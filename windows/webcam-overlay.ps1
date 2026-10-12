@@ -2,9 +2,7 @@
 
 $overlayLock = New-Object System.Threading.Mutex($false, 'Local\SunshineBroadcastOverlay')
 if (-not $overlayLock.WaitOne(0)) { exit }
-
-$vlcPath = Get-VlcPath
-if (-not $vlcPath) { exit 1 }
+if (-not (Test-Path $libmpvPath)) { exit 1 }
 
 $cameraName = (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).camera
 if (-not $cameraName) {
@@ -19,67 +17,90 @@ $marginBottom = 24
 
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing @'
 using System;
-using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
-public static class VlcWindow {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct Rect { public int Left, Top, Right, Bottom; }
+public static class Mpv {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string path);
+  [DllImport("libmpv-2.dll")] static extern IntPtr mpv_create();
+  [DllImport("libmpv-2.dll")] static extern int mpv_initialize(IntPtr handle);
+  [DllImport("libmpv-2.dll")] static extern int mpv_set_option_string(IntPtr handle, byte[] name, byte[] value);
+  [DllImport("libmpv-2.dll")] static extern int mpv_command(IntPtr handle, IntPtr[] args);
+  [DllImport("libmpv-2.dll")] static extern IntPtr mpv_get_property_string(IntPtr handle, byte[] name);
+  [DllImport("libmpv-2.dll")] static extern void mpv_free(IntPtr data);
+  [DllImport("libmpv-2.dll")] static extern IntPtr mpv_wait_event(IntPtr handle, double timeout);
+  [DllImport("libmpv-2.dll")] static extern void mpv_terminate_destroy(IntPtr handle);
 
-  delegate bool EnumWindowsCallback(IntPtr window, IntPtr data);
+  const int EventShutdown = 1;
+  const int EventEndFile = 7;
 
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr data);
-  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
-  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
-  [DllImport("user32.dll")] static extern IntPtr SetParent(IntPtr child, IntPtr parent);
-  [DllImport("user32.dll")] static extern bool EnableWindow(IntPtr window, bool enable);
-  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr window, int x, int y, int width, int height, bool repaint);
-  [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")] static extern IntPtr SetWindowLong(IntPtr window, int index, IntPtr value);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int maxLength);
+  static byte[] Utf8(string text) { return Encoding.UTF8.GetBytes(text + "\0"); }
 
-  const int GwlStyle = -16;
-  const int WsChild = 0x40000000;
-  const int WsVisible = 0x10000000;
+  public static void Load(string dllPath) { LoadLibrary(dllPath); }
 
-  static bool IsMainWindow(IntPtr window) {
-    var title = new StringBuilder(256);
-    GetWindowText(window, title, title.Capacity);
-    return title.ToString().IndexOf("media player", StringComparison.OrdinalIgnoreCase) >= 0;
+  public static IntPtr Create(IntPtr window) {
+    var handle = mpv_create();
+    if (handle == IntPtr.Zero) return handle;
+    SetOption(handle, "wid", window.ToInt64().ToString());
+    SetOption(handle, "profile", "low-latency");
+    SetOption(handle, "untimed", "yes");
+    SetOption(handle, "cache", "no");
+    SetOption(handle, "vf", "hflip");
+    SetOption(handle, "audio", "no");
+    SetOption(handle, "osc", "no");
+    SetOption(handle, "osd-level", "0");
+    SetOption(handle, "input-default-bindings", "no");
+    SetOption(handle, "input-vo-keyboard", "no");
+    SetOption(handle, "input-cursor", "no");
+    SetOption(handle, "cursor-autohide", "no");
+    SetOption(handle, "keepaspect", "yes");
+    if (mpv_initialize(handle) < 0) { mpv_terminate_destroy(handle); return IntPtr.Zero; }
+    return handle;
   }
 
-  static bool BelongsTo(IntPtr window, int processId) {
-    uint ownerId;
-    GetWindowThreadProcessId(window, out ownerId);
-    return ownerId == (uint)processId;
+  static void SetOption(IntPtr handle, string name, string value) {
+    mpv_set_option_string(handle, Utf8(name), Utf8(value));
   }
 
-  public static IntPtr FindVideoWindow(int processId) {
-    var found = IntPtr.Zero;
-    EnumWindows((window, data) => {
-      if (BelongsTo(window, processId) && IsWindowVisible(window) && !IsMainWindow(window)) { found = window; return false; }
-      return true;
-    }, IntPtr.Zero);
-    return found;
+  public static void Open(IntPtr handle, string url) {
+    var parts = new[] { "loadfile", url };
+    var args = new IntPtr[parts.Length + 1];
+    for (int index = 0; index < parts.Length; index++) {
+      var bytes = Utf8(parts[index]);
+      args[index] = Marshal.AllocHGlobal(bytes.Length);
+      Marshal.Copy(bytes, 0, args[index], bytes.Length);
+    }
+    mpv_command(handle, args);
+    for (int index = 0; index < parts.Length; index++) Marshal.FreeHGlobal(args[index]);
   }
 
-  public static void HideMainWindow(int processId) {
-    EnumWindows((window, data) => {
-      if (BelongsTo(window, processId) && IsMainWindow(window)) ShowWindow(window, 0);
-      return true;
-    }, IntPtr.Zero);
+  public static double GetAspectRatio(IntPtr handle) {
+    var value = mpv_get_property_string(handle, Utf8("video-params/aspect"));
+    if (value == IntPtr.Zero) return 0;
+    var bytes = new System.Collections.Generic.List<byte>();
+    for (int offset = 0; ; offset++) {
+      var current = Marshal.ReadByte(value, offset);
+      if (current == 0) break;
+      bytes.Add(current);
+    }
+    mpv_free(value);
+    double ratio;
+    return double.TryParse(Encoding.UTF8.GetString(bytes.ToArray()), System.Globalization.NumberStyles.Float,
+      System.Globalization.CultureInfo.InvariantCulture, out ratio) ? ratio : 0;
   }
 
-  public static void Embed(IntPtr child, IntPtr parent) {
-    SetWindowLong(child, GwlStyle, new IntPtr(WsChild | WsVisible));
-    SetParent(child, parent);
-    EnableWindow(child, false);
+  public static bool HasEnded(IntPtr handle) {
+    while (true) {
+      var mpvEvent = mpv_wait_event(handle, 0);
+      int eventId = Marshal.ReadInt32(mpvEvent);
+      if (eventId == 0) return false;
+      if (eventId == EventShutdown || eventId == EventEndFile) return true;
+    }
   }
+
+  public static void Destroy(IntPtr handle) { if (handle != IntPtr.Zero) mpv_terminate_destroy(handle); }
 }
 
 public class EndButtonForm : Form {
@@ -118,20 +139,31 @@ public class EndButtonForm : Form {
 }
 
 public class OverlayForm : Form {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct Rect { public int Left, Top, Right, Bottom; }
+
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+  [DllImport("user32.dll")] static extern bool EnableWindow(IntPtr window, bool enable);
+
   const int ResizeBorder = 10;
   const int CornerSize = ResizeBorder + 6;
   const int MinWidth = 240;
   const int ButtonInset = 6;
+  const uint ChildWindow = 5;
 
   readonly EndButtonForm endButtonForm;
-  readonly int vlcProcessId;
-  IntPtr videoWindow = IntPtr.Zero;
+  readonly string cameraName;
+  readonly Timer mpvTimer = new Timer { Interval = 250 };
+  IntPtr player = IntPtr.Zero;
+  bool aspectKnown;
 
   public double AspectRatio = 16.0 / 9.0;
+  public Func<bool> ShouldClose;
   public event EventHandler EndRequested;
+  public event EventHandler VideoStarted;
 
-  public OverlayForm(int vlcProcessId, string endLabel) {
-    this.vlcProcessId = vlcProcessId;
+  public OverlayForm(string cameraName, string endLabel) {
+    this.cameraName = cameraName;
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
@@ -140,20 +172,35 @@ public class OverlayForm : Form {
 
     endButtonForm = new EndButtonForm(endLabel);
     endButtonForm.EndButton.Click += (sender, args) => { if (EndRequested != null) EndRequested(this, EventArgs.Empty); };
-    Shown += (sender, args) => { endButtonForm.Show(this); PlaceEndButton(); };
+    Shown += (sender, args) => StartPlayer();
     LocationChanged += (sender, args) => PlaceEndButton();
-
-    var vlcWatcher = new Timer { Interval = 1000 };
-    vlcWatcher.Tick += (sender, args) => {
-      try { if (Process.GetProcessById(vlcProcessId).HasExited) Close(); } catch { Close(); }
-    };
-    vlcWatcher.Start();
+    FormClosed += (sender, args) => { mpvTimer.Stop(); Mpv.Destroy(player); };
+    mpvTimer.Tick += (sender, args) => CheckPlayer();
   }
 
-  public void AttachVideo(IntPtr window) {
-    videoWindow = window;
-    VlcWindow.Embed(window, Handle);
-    FitVideo();
+  void StartPlayer() {
+    endButtonForm.Show(this);
+    PlaceEndButton();
+    player = Mpv.Create(Handle);
+    if (player == IntPtr.Zero) { Close(); return; }
+    Mpv.Open(player, "av://dshow:video=" + cameraName);
+    mpvTimer.Start();
+  }
+
+  void CheckPlayer() {
+    if ((ShouldClose != null && ShouldClose()) || Mpv.HasEnded(player)) { Close(); return; }
+
+    var videoWindow = GetWindow(Handle, ChildWindow);
+    if (videoWindow != IntPtr.Zero) EnableWindow(videoWindow, false);
+
+    if (aspectKnown) return;
+    var ratio = Mpv.GetAspectRatio(player);
+    if (ratio < 1.0 || ratio > 2.5) return;
+    aspectKnown = true;
+    AspectRatio = ratio;
+    int newHeight = (int)(Width / AspectRatio);
+    SetBounds(Left, Bottom - newHeight, Width, newHeight);
+    if (VideoStarted != null) VideoStarted(this, EventArgs.Empty);
   }
 
   protected override CreateParams CreateParams {
@@ -168,16 +215,9 @@ public class OverlayForm : Form {
     endButtonForm.Location = new Point(Right - endButtonForm.Width - ButtonInset, Top + ButtonInset);
   }
 
-  void FitVideo() {
-    if (videoWindow != IntPtr.Zero) {
-      VlcWindow.MoveWindow(videoWindow, 0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height), true);
-    }
-    PlaceEndButton();
-  }
-
   protected override void OnResize(EventArgs args) {
     base.OnResize(args);
-    FitVideo();
+    if (endButtonForm != null) PlaceEndButton();
   }
 
   int HitTest(Point point) {
@@ -198,7 +238,7 @@ public class OverlayForm : Form {
     return 2;
   }
 
-  void KeepAspectRatio(ref VlcWindow.Rect bounds, int edge) {
+  void KeepAspectRatio(ref Rect bounds, int edge) {
     int maxWidth = Screen.FromHandle(Handle).WorkingArea.Width / 2;
     bool draggingTopOrBottom = edge == 3 || edge == 6;
     int width = draggingTopOrBottom ? (int)((bounds.Bottom - bounds.Top) * AspectRatio) : bounds.Right - bounds.Left;
@@ -221,7 +261,7 @@ public class OverlayForm : Form {
     }
 
     if (message.Msg == WmSizing) {
-      var bounds = (VlcWindow.Rect)Marshal.PtrToStructure(message.LParam, typeof(VlcWindow.Rect));
+      var bounds = (Rect)Marshal.PtrToStructure(message.LParam, typeof(Rect));
       KeepAspectRatio(ref bounds, message.WParam.ToInt32());
       Marshal.StructureToPtr(bounds, message.LParam, false);
       message.Result = (IntPtr)1;
@@ -233,49 +273,20 @@ public class OverlayForm : Form {
 }
 '@
 
-[VlcWindow]::SetProcessDPIAware() | Out-Null
+[Mpv]::Load($libmpvPath)
+Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name Dpi -Namespace Native
+[Native.Dpi]::SetProcessDPIAware() | Out-Null
 
-$vlcArguments = @(
-  'dshow://', "`":dshow-vdev=$cameraName`"", ':dshow-adev=none', ':live-caching=0',
-  '--qt-start-minimized', '--no-embedded-video', '--no-video-deco', '--no-video-title-show',
-  '--no-qt-video-autoresize', '--no-mouse-events', '--video-filter=transform', '--transform-type=hflip'
-) -join ' '
-$vlcProcess = Start-Process $vlcPath $vlcArguments -WorkingDirectory (Split-Path $vlcPath) -PassThru
-
-$videoWindow = [IntPtr]::Zero
-for ($attempt = 0; $attempt -lt 75 -and $videoWindow -eq [IntPtr]::Zero; $attempt++) {
-  Start-Sleep -Milliseconds 200
-  $videoWindow = [VlcWindow]::FindVideoWindow($vlcProcess.Id)
-}
-if ($videoWindow -eq [IntPtr]::Zero) { exit 1 }
-
-$aspectRatio = 16.0 / 9.0
-$lastWidth = 0
-$stableCount = 0
-for ($attempt = 0; $attempt -lt 25 -and $stableCount -lt 2; $attempt++) {
-  Start-Sleep -Milliseconds 200
-  $videoBounds = New-Object VlcWindow+Rect
-  [VlcWindow]::GetWindowRect($videoWindow, [ref]$videoBounds) | Out-Null
-  $videoWidth = $videoBounds.Right - $videoBounds.Left
-  $videoHeight = $videoBounds.Bottom - $videoBounds.Top
-  if ($videoWidth -le 100 -or $videoHeight -le 50) { continue }
-
-  if ($videoWidth -eq $lastWidth) { $stableCount++ } else { $stableCount = 0; $lastWidth = $videoWidth }
-  $measuredRatio = $videoWidth / $videoHeight
-  if ($measuredRatio -ge 1.0 -and $measuredRatio -le 2.5) { $aspectRatio = $measuredRatio }
-}
-
-[VlcWindow]::HideMainWindow($vlcProcess.Id)
+$closeSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $overlayCloseName)
 
 $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $overlayWidth = [int]($workArea.Width * $widthRatio)
-$overlayHeight = [int]($overlayWidth / $aspectRatio)
+$overlayHeight = [int]($overlayWidth * 9 / 16)
 
-$overlay = New-Object OverlayForm -ArgumentList $vlcProcess.Id, $scriptConfig.endButton
-$overlay.AspectRatio = $aspectRatio
+$overlay = New-Object OverlayForm -ArgumentList ($cameraName -replace '"', ''), $scriptConfig.endButton
 $overlay.SetBounds($workArea.Left + $marginLeft, $workArea.Bottom - $overlayHeight - $marginBottom, $overlayWidth, $overlayHeight)
-$overlay.Add_Shown({
-  $overlay.AttachVideo($videoWindow)
+$overlay.ShouldClose = [Func[bool]]{ $closeSignal.WaitOne(0) }
+$overlay.Add_VideoStarted({
   $script:overlayReady = New-Object System.Threading.EventWaitHandle($true, 'ManualReset', $overlayReadyName)
 })
 $overlay.Add_EndRequested({

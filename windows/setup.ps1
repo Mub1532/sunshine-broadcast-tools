@@ -168,7 +168,7 @@ $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 
 $warnings = @()
 if (-not $cable) { $warnings += $scriptConfig.cableMissing }
-if (-not (Get-VlcPath)) { $warnings += $scriptConfig.vlcMissing }
+if (-not (Test-Path $libmpvPath)) { $warnings += $scriptConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
 }

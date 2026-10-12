@@ -17,7 +17,8 @@ function Restore-Speakers {
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
-  Stop-Process -Name vlc -Force -ErrorAction SilentlyContinue
+  $overlayClose = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($overlayCloseName, [ref]$overlayClose)) { [void]$overlayClose.Set() }
   $stopSignal = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($stopEventName, [ref]$stopSignal)) { [void]$stopSignal.Set() }
   Restore-Speakers

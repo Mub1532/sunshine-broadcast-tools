@@ -12,7 +12,7 @@
   "applyButton": "Apply to Sunshine",
 
   "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",
-  "vlcMissing": "VLC is not installed. The webcam overlay will not open.",
+  "mpvMissing": "libmpv-2.dll was not found. The webcam overlay will not open. Run the installer again.",
   "svclMissing": "svcl.exe was not found in:\n{folder}\n\nDownload svcl from nirsoft.net, place svcl.exe in this folder and run Setup again.",
   "devicesUnreadable": "Could not read audio devices.",
   "selectDevices": "Select speakers and a microphone.",

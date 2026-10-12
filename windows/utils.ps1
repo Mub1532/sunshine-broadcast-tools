@@ -3,6 +3,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 $appDir = $PSScriptRoot
 $svclPath = Join-Path $appDir 'svcl.exe'
+$libmpvPath = Join-Path $appDir 'libmpv-2.dll'
 $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
@@ -14,6 +15,7 @@ $cableId = 'VB-Audio Virtual Cable\Device\CABLE Input\Render'
 $stopEventName = 'Local\SunshineBroadcastStop'
 $sessionLockName = 'Local\SunshineBroadcastSession'
 $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
+$overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -30,11 +32,6 @@ function Get-HiddenCommand([string]$script, [string]$arguments = '') {
 
 function Start-Hidden([string]$script, [string]$arguments = '') {
   Start-Process conhost.exe ((Get-HiddenCommand $script $arguments) -replace '^conhost\.exe ', '')
-}
-
-function Get-VlcPath {
-  "$env:ProgramFiles\VideoLAN\VLC\vlc.exe", "${env:ProgramFiles(x86)}\VideoLAN\VLC\vlc.exe" |
-    Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 
 function Stop-Stream {
