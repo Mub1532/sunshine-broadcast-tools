@@ -42,7 +42,7 @@ switch ($action) {
     if (-not $isNew) { exit }
     if ($session) { $sessionLock = New-Object System.Threading.Mutex($true, $sessionLockName) }
 
-    Add-Type @'
+    Import-CSharp 'audio-guard' @'
 using System;
 using System.Runtime.InteropServices;
 

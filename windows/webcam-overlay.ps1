@@ -15,7 +15,7 @@ $widthRatio = 0.20
 $marginLeft = 16
 $marginBottom = 24
 
-Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing @'
+Import-CSharp 'webcam-overlay' -references System.Windows.Forms, System.Drawing -source @'
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -24,6 +24,7 @@ using System.Windows.Forms;
 
 public static class Mpv {
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string path);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("libmpv-2.dll")] static extern IntPtr mpv_create();
   [DllImport("libmpv-2.dll")] static extern int mpv_initialize(IntPtr handle);
   [DllImport("libmpv-2.dll")] static extern int mpv_set_option_string(IntPtr handle, byte[] name, byte[] value);
@@ -47,6 +48,8 @@ public static class Mpv {
     SetOption(handle, "profile", "low-latency");
     SetOption(handle, "untimed", "yes");
     SetOption(handle, "cache", "no");
+    SetOption(handle, "demuxer-lavf-probesize", "32");
+    SetOption(handle, "demuxer-lavf-analyzeduration", "0");
     SetOption(handle, "vf", "hflip");
     SetOption(handle, "audio", "no");
     SetOption(handle, "osc", "no");
@@ -274,8 +277,7 @@ public class OverlayForm : Form {
 '@
 
 [Mpv]::Load($libmpvPath)
-Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name Dpi -Namespace Native
-[Native.Dpi]::SetProcessDPIAware() | Out-Null
+[Mpv]::SetProcessDPIAware() | Out-Null
 
 $closeSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $overlayCloseName)
 

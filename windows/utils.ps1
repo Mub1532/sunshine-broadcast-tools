@@ -34,6 +34,22 @@ function Start-Hidden([string]$script, [string]$arguments = '') {
   Start-Process conhost.exe ((Get-HiddenCommand $script $arguments) -replace '^conhost\.exe ', '')
 }
 
+function Import-CSharp([string]$name, [string]$source, [string[]]$references = @()) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $hash = -join ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($source)) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') })
+  $cacheDir = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools'
+  $dllPath = Join-Path $cacheDir "$name-$hash.dll"
+  if (-not (Test-Path $dllPath)) {
+    New-Item $cacheDir -ItemType Directory -Force | Out-Null
+    Get-ChildItem $cacheDir -Filter "$name-*.dll" -ErrorAction SilentlyContinue | Remove-Item -ErrorAction SilentlyContinue
+    $compileOptions = @{ TypeDefinition = $source }
+    if ($references) { $compileOptions.ReferencedAssemblies = $references }
+    try { Add-Type @compileOptions -OutputAssembly $dllPath -OutputType Library }
+    catch { Add-Type @compileOptions; return }
+  }
+  Add-Type -Path $dllPath
+}
+
 function Stop-Stream {
   Start-Process sc.exe "stop $serviceName" -WindowStyle Hidden -Wait
   & (Join-Path $appDir 'broadcast.ps1') stop
