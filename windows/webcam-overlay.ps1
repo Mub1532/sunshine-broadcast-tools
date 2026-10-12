@@ -59,6 +59,7 @@ public static class Mpv {
     SetOption(handle, "input-cursor", "no");
     SetOption(handle, "cursor-autohide", "no");
     SetOption(handle, "keepaspect", "no");
+    SetOption(handle, "d3d11-flip", "no");
     if (mpv_initialize(handle) < 0) { mpv_terminate_destroy(handle); return IntPtr.Zero; }
     return handle;
   }
@@ -159,6 +160,7 @@ public class OverlayForm : Form {
   readonly Timer mpvTimer = new Timer { Interval = 250 };
   IntPtr player = IntPtr.Zero;
   bool aspectKnown;
+  bool videoDisabled;
 
   public double AspectRatio = 16.0 / 9.0;
   public Func<bool> ShouldClose;
@@ -193,8 +195,10 @@ public class OverlayForm : Form {
   void CheckPlayer() {
     if ((ShouldClose != null && ShouldClose()) || Mpv.HasEnded(player)) { Close(); return; }
 
-    var videoWindow = GetWindow(Handle, ChildWindow);
-    if (videoWindow != IntPtr.Zero) EnableWindow(videoWindow, false);
+    if (!videoDisabled) {
+      var videoWindow = GetWindow(Handle, ChildWindow);
+      if (videoWindow != IntPtr.Zero) { EnableWindow(videoWindow, false); videoDisabled = true; }
+    }
 
     if (aspectKnown) return;
     var ratio = Mpv.GetAspectRatio(player);
@@ -217,6 +221,10 @@ public class OverlayForm : Form {
 
   void PlaceEndButton() {
     endButtonForm.Location = new Point(Right - endButtonForm.Width - ButtonInset, Top + ButtonInset);
+  }
+
+  protected override void OnPaintBackground(PaintEventArgs args) {
+    if (player == IntPtr.Zero) base.OnPaintBackground(args);
   }
 
   protected override void OnResize(EventArgs args) {
