@@ -58,7 +58,7 @@ public static class Mpv {
     SetOption(handle, "input-vo-keyboard", "no");
     SetOption(handle, "input-cursor", "no");
     SetOption(handle, "cursor-autohide", "no");
-    SetOption(handle, "keepaspect", "yes");
+    SetOption(handle, "keepaspect", "no");
     if (mpv_initialize(handle) < 0) { mpv_terminate_destroy(handle); return IntPtr.Zero; }
     return handle;
   }
@@ -210,6 +210,7 @@ public class OverlayForm : Form {
     get {
       var parameters = base.CreateParams;
       parameters.ExStyle |= 0x80;
+      parameters.Style |= 0x02000000;
       return parameters;
     }
   }
