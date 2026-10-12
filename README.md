@@ -37,7 +37,19 @@ Anyone who wants to show a computer's screen, face and voice on another screen o
 
 - Turn on **Play audio on host PC**, so sound still plays from the host's speakers.
 
-## Installation
+# Installation
+
+## Windows
+
+Open **PowerShell** and run:
+
+```powershell
+irm https://raw.githubusercontent.com/Mub1532/sunshine-broadcast-tools/main/windows/install.ps1 | iex
+```
+
+This downloads the latest version, installs it to `C:\ProgramData\sunshine-broadcast-tools` and opens Setup. Run the same command again to update.
+
+## Linux
 
 WIP
 

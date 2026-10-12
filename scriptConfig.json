@@ -1,0 +1,39 @@
+{
+  "title": "Sunshine Broadcast",
+  "setupTitle": "Sunshine Broadcast Setup",
+  "appName": "Desktop Broadcast",
+
+  "speakersLabel": "Speakers (plays sound on this computer):",
+  "microphoneLabel": "Microphone (sent to the stream):",
+  "cameraLabel": "Camera:",
+  "audioSinkLabel": "Sunshine Audio Sink:",
+  "copyButton": "Copy",
+  "saveButton": "Save",
+  "applyButton": "Apply to Sunshine",
+
+  "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",
+  "vlcMissing": "VLC is not installed. The webcam overlay will not open.",
+  "svclMissing": "svcl.exe was not found in:\n{folder}\n\nDownload svcl from nirsoft.net, place svcl.exe in this folder and run Setup again.",
+  "devicesUnreadable": "Could not read audio devices.",
+  "selectDevices": "Select speakers and a microphone.",
+  "saved": "Settings saved.",
+  "saveFailed": "Could not save settings:\n{error}",
+  "applied": "Sunshine has been configured and the Start & End shortcuts were added to the desktop.",
+  "restarted": "Sunshine was restarted to apply the changes.",
+  "applyFailed": "Could not configure Sunshine:\n{error}",
+  "adminRequired": "Administrator permission is required to configure Sunshine.",
+
+  "startShortcut": "Start Sunshine Stream",
+  "startShortcutTip": "Start a broadcast stream in Sunshine",
+  "endShortcut": "End Sunshine Stream",
+  "endShortcutTip": "End the broadcast stream and stop Sunshine",
+
+  "starting": "Starting stream...",
+  "ready": "Stream is running.\n\nOn the viewing device, open Moonlight, select \"{host}\" and then \"{app}\".",
+  "sunshineMissing": "Sunshine is not installed on this computer.",
+  "startFailed": "Stream could not be started.\n\nCheck that the Sunshine service is installed and that users are allowed to start it.",
+
+  "endButton": "End Stream",
+  "endConfirm": "End the stream?\n\nThe stream will disconnect and Sunshine will stop.",
+  "ended": "Stream ended."
+}
