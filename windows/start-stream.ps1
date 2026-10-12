@@ -53,18 +53,20 @@ $progressForm.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
 $progressForm.Show()
 $progressForm.Refresh()
 
+& (Join-Path $appDir 'broadcast.ps1') start
+Start-Hidden 'webcam-overlay.ps1'
+
 if (-not (Test-SunshineReady)) {
   Start-Process sc.exe "start $serviceName" -WindowStyle Hidden -Wait
   if (-not (Wait-Until { Test-SunshineReady } 60)) {
+    & (Join-Path $appDir 'broadcast.ps1') stop
     $progressForm.Close()
     Show-Message $scriptConfig.startFailed 'Error' | Out-Null
     exit 1
   }
 }
 
-& (Join-Path $appDir 'broadcast.ps1') start
 Start-Hidden 'broadcast.ps1' 'guard -session'
-Start-Hidden 'webcam-overlay.ps1'
 Wait-Until { Test-OverlayReady } 20 | Out-Null
 
 $progressForm.Close()
