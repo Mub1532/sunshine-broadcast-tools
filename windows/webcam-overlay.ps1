@@ -4,7 +4,8 @@ $overlayLock = New-Object System.Threading.Mutex($false, 'Local\SunshineBroadcas
 if (-not $overlayLock.WaitOne(0)) { exit }
 if (-not (Test-Path $libmpvPath)) { exit 1 }
 
-$cameraName = (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).camera
+$deviceConfig = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+$cameraName = $deviceConfig.camera
 if (-not $cameraName) {
   $cameraName = Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
     Where-Object Class -in 'Camera', 'Image' | Select-Object -First 1 -ExpandProperty FriendlyName
@@ -48,6 +49,7 @@ public static class Mpv {
     SetOption(handle, "profile", "low-latency");
     SetOption(handle, "untimed", "yes");
     SetOption(handle, "cache", "no");
+    SetOption(handle, "idle", "yes");
     SetOption(handle, "demuxer-lavf-probesize", "32");
     SetOption(handle, "demuxer-lavf-analyzeduration", "0");
     SetOption(handle, "vf", "hflip");
@@ -95,6 +97,15 @@ public static class Mpv {
       System.Globalization.CultureInfo.InvariantCulture, out ratio) ? ratio : 0;
   }
 
+  public static void Stop(IntPtr handle) {
+    var bytes = Utf8("stop");
+    var args = new IntPtr[2];
+    args[0] = Marshal.AllocHGlobal(bytes.Length);
+    Marshal.Copy(bytes, 0, args[0], bytes.Length);
+    mpv_command(handle, args);
+    Marshal.FreeHGlobal(args[0]);
+  }
+
   public static bool HasEnded(IntPtr handle) {
     while (true) {
       var mpvEvent = mpv_wait_event(handle, 0);
@@ -107,28 +118,35 @@ public static class Mpv {
   public static void Destroy(IntPtr handle) { if (handle != IntPtr.Zero) mpv_terminate_destroy(handle); }
 }
 
-public class EndButtonForm : Form {
-  public readonly Button EndButton = new Button();
+public class OverlayButton : Form {
+  public readonly Button Button = new Button();
+  readonly ToolTip toolTip = new ToolTip { ShowAlways = true };
 
-  public EndButtonForm(string label) {
-    var red = Color.FromArgb(185, 45, 45);
+  public OverlayButton(string text, string fontName, float fontSize, Size size) {
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
     StartPosition = FormStartPosition.Manual;
-    BackColor = red;
-    Size = new Size(92, 24);
+    Size = size;
 
-    EndButton.Text = label;
-    EndButton.Dock = DockStyle.Fill;
-    EndButton.TabStop = false;
-    EndButton.FlatStyle = FlatStyle.Flat;
-    EndButton.FlatAppearance.BorderSize = 0;
-    EndButton.BackColor = red;
-    EndButton.ForeColor = Color.White;
-    EndButton.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
-    EndButton.Cursor = Cursors.Hand;
-    Controls.Add(EndButton);
+    Button.Text = text;
+    Button.Dock = DockStyle.Fill;
+    Button.TabStop = false;
+    Button.FlatStyle = FlatStyle.Flat;
+    Button.FlatAppearance.BorderSize = 0;
+    Button.ForeColor = Color.White;
+    Button.Font = new Font(fontName, fontSize, fontName == "Segoe UI" ? FontStyle.Bold : FontStyle.Regular);
+    Button.Padding = Padding.Empty;
+    Button.TextAlign = ContentAlignment.MiddleCenter;
+    Button.UseCompatibleTextRendering = true;
+    Button.Cursor = Cursors.Hand;
+    Controls.Add(Button);
+  }
+
+  public void SetLook(Color color, string tip) {
+    BackColor = color;
+    Button.BackColor = color;
+    toolTip.SetToolTip(Button, tip);
   }
 
   protected override bool ShowWithoutActivation { get { return true; } }
@@ -153,47 +171,100 @@ public class OverlayForm : Form {
   const int CornerSize = ResizeBorder + 6;
   const int MinWidth = 240;
   const int ButtonInset = 6;
+  const int ButtonGap = 4;
+  const string CameraGlyph = "\uE714";
+  const string MicrophoneGlyph = "\uE720";
+  static readonly Color Red = Color.FromArgb(185, 45, 45);
+  static readonly Color Grey = Color.FromArgb(60, 60, 60);
   const uint ChildWindow = 5;
 
-  readonly EndButtonForm endButtonForm;
+  readonly OverlayButton endButton;
+  readonly OverlayButton cameraButton;
+  readonly OverlayButton microphoneButton;
+  readonly string[] tips;
   readonly string cameraName;
   readonly Timer mpvTimer = new Timer { Interval = 250 };
   IntPtr player = IntPtr.Zero;
   bool aspectKnown;
   bool videoDisabled;
+  bool cameraOn = true;
+  bool microphoneOn = true;
 
   public double AspectRatio = 16.0 / 9.0;
   public Func<bool> ShouldClose;
   public event EventHandler EndRequested;
   public event EventHandler VideoStarted;
+  public Action<bool> MicrophoneToggled;
 
-  public OverlayForm(string cameraName, string endLabel) {
+  public OverlayForm(string cameraName, string endLabel, string[] tips) {
     this.cameraName = cameraName;
+    this.tips = tips;
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
     StartPosition = FormStartPosition.Manual;
     BackColor = Color.Black;
 
-    endButtonForm = new EndButtonForm(endLabel);
-    endButtonForm.EndButton.Click += (sender, args) => { if (EndRequested != null) EndRequested(this, EventArgs.Empty); };
+    string iconFont = IsFontInstalled("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+    endButton = new OverlayButton(endLabel, "Segoe UI", 8.5f, new Size(92, 24));
+    cameraButton = new OverlayButton(CameraGlyph, iconFont, 11f, new Size(34, 30));
+    microphoneButton = new OverlayButton(MicrophoneGlyph, iconFont, 11f, new Size(34, 30));
+    endButton.SetLook(Red, endLabel);
+    UpdateToggleLooks();
+
+    endButton.Button.Click += (sender, args) => { if (EndRequested != null) EndRequested(this, EventArgs.Empty); };
+    cameraButton.Button.Click += (sender, args) => ToggleCamera();
+    microphoneButton.Button.Click += (sender, args) => ToggleMicrophone();
     Shown += (sender, args) => StartPlayer();
-    LocationChanged += (sender, args) => PlaceEndButton();
+    LocationChanged += (sender, args) => PlaceButtons();
     FormClosed += (sender, args) => { mpvTimer.Stop(); Mpv.Destroy(player); };
     mpvTimer.Tick += (sender, args) => CheckPlayer();
   }
 
+  static bool IsFontInstalled(string name) {
+    foreach (var family in FontFamily.Families) if (family.Name == name) return true;
+    return false;
+  }
+
+  void UpdateToggleLooks() {
+    cameraButton.SetLook(cameraOn ? Grey : Red, cameraOn ? tips[0] : tips[1]);
+    microphoneButton.SetLook(microphoneOn ? Grey : Red, microphoneOn ? tips[2] : tips[3]);
+  }
+
   void StartPlayer() {
-    endButtonForm.Show(this);
-    PlaceEndButton();
+    endButton.Show(this);
+    cameraButton.Show(this);
+    microphoneButton.Show(this);
+    PlaceButtons();
     player = Mpv.Create(Handle);
     if (player == IntPtr.Zero) { Close(); return; }
-    Mpv.Open(player, "av://dshow:video=" + cameraName);
+    OpenCamera();
     mpvTimer.Start();
   }
 
+  void OpenCamera() {
+    Mpv.HasEnded(player);
+    videoDisabled = false;
+    Mpv.Open(player, "av://dshow:video=" + cameraName);
+  }
+
+  void ToggleCamera() {
+    cameraOn = !cameraOn;
+    if (cameraOn) OpenCamera(); else Mpv.Stop(player);
+    UpdateToggleLooks();
+    Invalidate();
+  }
+
+  void ToggleMicrophone() {
+    microphoneOn = !microphoneOn;
+    UpdateToggleLooks();
+    if (MicrophoneToggled != null) MicrophoneToggled(microphoneOn);
+  }
+
   void CheckPlayer() {
-    if ((ShouldClose != null && ShouldClose()) || Mpv.HasEnded(player)) { Close(); return; }
+    bool ended = Mpv.HasEnded(player);
+    if ((ShouldClose != null && ShouldClose()) || (ended && cameraOn)) { Close(); return; }
+    if (!cameraOn) return;
 
     if (!videoDisabled) {
       var videoWindow = GetWindow(Handle, ChildWindow);
@@ -219,17 +290,19 @@ public class OverlayForm : Form {
     }
   }
 
-  void PlaceEndButton() {
-    endButtonForm.Location = new Point(Right - endButtonForm.Width - ButtonInset, Top + ButtonInset);
+  void PlaceButtons() {
+    endButton.Location = new Point(Right - endButton.Width - ButtonInset, Top + ButtonInset);
+    cameraButton.Location = new Point(Right - cameraButton.Width - ButtonInset, Bottom - cameraButton.Height - ButtonInset);
+    microphoneButton.Location = new Point(cameraButton.Left - microphoneButton.Width - ButtonGap, cameraButton.Top);
   }
 
   protected override void OnPaintBackground(PaintEventArgs args) {
-    if (player == IntPtr.Zero) base.OnPaintBackground(args);
+    if (player == IntPtr.Zero || !cameraOn) base.OnPaintBackground(args);
   }
 
   protected override void OnResize(EventArgs args) {
     base.OnResize(args);
-    if (endButtonForm != null) PlaceEndButton();
+    if (endButton != null) PlaceButtons();
   }
 
   int HitTest(Point point) {
@@ -294,12 +367,17 @@ $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $overlayWidth = [int]($workArea.Width * $widthRatio)
 $overlayHeight = [int]($overlayWidth * 9 / 16)
 
-$overlay = New-Object OverlayForm -ArgumentList ($cameraName -replace '"', ''), $scriptConfig.endButton
+$buttonTips = [string[]]@($scriptConfig.cameraOff, $scriptConfig.cameraOn, $scriptConfig.micMute, $scriptConfig.micUnmute)
+$overlay = New-Object OverlayForm -ArgumentList ($cameraName -replace '"', ''), $scriptConfig.endButton, $buttonTips
 $overlay.SetBounds($workArea.Left + $marginLeft, $workArea.Bottom - $overlayHeight - $marginBottom, $overlayWidth, $overlayHeight)
 $overlay.ShouldClose = [Func[bool]]{ $closeSignal.WaitOne(0) }
 $overlay.Add_VideoStarted({
   $script:overlayReady = New-Object System.Threading.EventWaitHandle($true, 'ManualReset', $overlayReadyName)
 })
+$overlay.MicrophoneToggled = [Action[bool]]{
+  param($microphoneOn)
+  & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
+}
 $overlay.Add_EndRequested({
   if ((Show-Message $scriptConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
 })
