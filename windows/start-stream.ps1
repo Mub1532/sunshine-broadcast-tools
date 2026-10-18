@@ -8,7 +8,7 @@ if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
 }
 
 function Test-SunshineReady {
-  $ports = Get-NetTCPConnection -State Listen -LocalPort 47989, 47990 -ErrorAction SilentlyContinue |
+  $ports = Get-NetTCPConnection -State Listen -LocalPort $sunshinePort, ($sunshinePort + 1) -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty LocalPort | Sort-Object -Unique
   @($ports).Count -eq 2
 }
@@ -29,10 +29,13 @@ function Wait-Until([scriptblock]$condition, [int]$timeoutSeconds) {
 }
 
 $hostName = $env:COMPUTERNAME
+$sunshinePort = 47989
 $sunshineConf = Join-Path $sunshineConfigDir 'sunshine.conf'
 if (Test-Path $sunshineConf) {
   $nameLine = Select-String -Path $sunshineConf -Pattern '^\s*sunshine_name\s*=\s*(\S.*)$' | Select-Object -First 1
   if ($nameLine) { $hostName = $nameLine.Matches[0].Groups[1].Value.Trim() }
+  $portLine = Select-String -Path $sunshineConf -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
+  if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
 $readyMessage = Format-Text $scriptConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
@@ -51,6 +54,7 @@ $progressForm.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
   Font      = New-Object System.Drawing.Font('Segoe UI', 11)
 }))
 $progressForm.Show()
+Show-OnTop $progressForm
 $progressForm.Refresh()
 
 & (Join-Path $appDir 'broadcast.ps1') start
