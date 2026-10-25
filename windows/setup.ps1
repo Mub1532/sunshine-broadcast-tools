@@ -47,6 +47,19 @@ function Update-SunshineApps {
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
 
+function Install-SunshineService {
+  if (Get-Service $serviceName -ErrorAction SilentlyContinue) { return }
+  $installScript = Join-Path $env:ProgramFiles 'Sunshine\scripts\install-service.bat'
+  if (Test-Path $installScript) { Start-Process cmd.exe "/c `"$installScript`"" -WindowStyle Hidden -Wait }
+  if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) { throw 'The Sunshine service is missing. Reinstall Sunshine as administrator.' }
+}
+
+function Add-FirewallRules {
+  $sunshinePath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
+  Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+  New-NetFirewallRule -DisplayName 'Sunshine Broadcast' -Direction Inbound -Program $sunshinePath -Action Allow -Profile Any | Out-Null
+}
+
 function Grant-ServiceControl {
   $securityDescriptor = (sc.exe sdshow $serviceName | Where-Object { $_ }) -join ''
   $userAccess = '(A;;RPWPLC;;;IU)'
@@ -69,11 +82,22 @@ function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [stri
 if ($applyFrom) {
   try {
     $request = Get-Content $applyFrom -Raw | ConvertFrom-Json
-    Update-SunshineConf $request.audioSink
-    Update-SunshineApps
-    Grant-ServiceControl
-    New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
-    New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
+    $failures = @()
+    $steps = [ordered]@{
+      'Service'   = { Install-SunshineService; Grant-ServiceControl }
+      'Firewall'  = { Add-FirewallRules }
+      'Config'    = { Update-SunshineConf $request.audioSink }
+      'Apps'      = { Update-SunshineApps }
+      'Shortcuts' = {
+        New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
+        New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
+      }
+    }
+    foreach ($step in $steps.GetEnumerator()) {
+      try { & $step.Value }
+      catch { $failures += "$($step.Key): $($_.Exception.Message)" }
+    }
+    if ($failures) { throw ($failures -join "`n") }
 
     if ((Get-Service $serviceName).Status -eq 'Running') {
       Restart-Service $serviceName -Force
@@ -224,4 +248,8 @@ $saveButton.Add_Click({ if (Save-Config) { Show-Message $scriptConfig.saved | Ou
 $applyButton.Add_Click({ Invoke-Apply })
 
 $setupForm.ClientSize = New-Object System.Drawing.Size(500, $script:nextTop)
+$setupForm.Add_Shown({
+  Show-OnTop $setupForm
+  $setupForm.TopMost = $false
+})
 [void]$setupForm.ShowDialog()

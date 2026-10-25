@@ -34,6 +34,10 @@
   "startFailed": "Stream could not be started.\n\nCheck that the Sunshine service is installed and that users are allowed to start it.",
 
   "endButton": "End Stream",
+  "cameraOff": "Turn camera off",
+  "cameraOn": "Turn camera on",
+  "micMute": "Mute microphone",
+  "micUnmute": "Unmute microphone",
   "endConfirm": "End the stream?\n\nThe stream will disconnect and Sunshine will stop.",
   "ended": "Stream ended."
 }

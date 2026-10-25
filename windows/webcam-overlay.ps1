@@ -118,8 +118,14 @@ public static class Mpv {
   public static void Destroy(IntPtr handle) { if (handle != IntPtr.Zero) mpv_terminate_destroy(handle); }
 }
 
+public class FlatButton : Button {
+  public FlatButton() { SetStyle(ControlStyles.Selectable, false); }
+  protected override bool ShowFocusCues { get { return false; } }
+  public override void NotifyDefault(bool value) { base.NotifyDefault(false); }
+}
+
 public class OverlayButton : Form {
-  public readonly Button Button = new Button();
+  public readonly FlatButton Button = new FlatButton();
   readonly ToolTip toolTip = new ToolTip { ShowAlways = true };
 
   public OverlayButton(string text, string fontName, float fontSize, Size size) {
@@ -146,6 +152,9 @@ public class OverlayButton : Form {
   public void SetLook(Color color, string tip) {
     BackColor = color;
     Button.BackColor = color;
+    Button.FlatAppearance.BorderColor = color;
+    Button.FlatAppearance.MouseDownBackColor = ControlPaint.Dark(color, 0.1f);
+    Button.FlatAppearance.MouseOverBackColor = ControlPaint.Light(color, 0.2f);
     toolTip.SetToolTip(Button, tip);
   }
 

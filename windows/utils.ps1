@@ -22,8 +22,17 @@ function Format-Text([string]$template, [hashtable]$values) {
   $template
 }
 
+function Show-OnTop([System.Windows.Forms.Form]$form) {
+  $form.TopMost = $true
+  $form.Activate()
+}
+
 function Show-Message([string]$message, [string]$icon = 'Information', [string]$buttons = 'OK') {
-  [System.Windows.Forms.MessageBox]::Show($message, $scriptConfig.title, $buttons, $icon)
+  $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; Opacity = 0; Size = '1,1'; StartPosition = 'CenterScreen' }
+  $owner.Show()
+  $owner.Activate()
+  try { [System.Windows.Forms.MessageBox]::Show($owner, $message, $scriptConfig.title, $buttons, $icon) }
+  finally { $owner.Dispose() }
 }
 
 function Get-HiddenCommand([string]$script, [string]$arguments = '') {
