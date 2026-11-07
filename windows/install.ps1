@@ -1,3 +1,5 @@
+param([switch]$Class)
+
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
@@ -10,7 +12,7 @@ $cableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.
 $mpvReleaseUrl = 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
 $installDir = Join-Path $env:ProgramData $repoName
 $windowsDir = Join-Path $installDir 'windows'
-$keepFiles = 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll'
+$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll'
 
 $tempDir = Join-Path $env:TEMP "$repoName-install"
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -64,6 +66,17 @@ try {
     tar.exe -xf (Get-Download $asset.browser_download_url 'mpv.7z') -C $mpvDir
     if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
     Copy-Item (Get-ChildItem $mpvDir -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
+  }
+
+  if ($Class) {
+    $messagesPath = Join-Path $installDir 'messageConfig.json'
+    $messagesText = Get-Content $messagesPath -Raw -Encoding UTF8
+    $preset = Get-Content (Join-Path $installDir 'presets\class.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($message in $preset.PSObject.Properties) {
+      $escapedValue = $message.Value.Replace('\', '\\').Replace('"', '\"')
+      $messagesText = $messagesText -replace "(?m)^(\s*`"$($message.Name)`"\s*:\s*)`".*?(?<!\\)`"", "`${1}`"$escapedValue`""
+    }
+    [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
   }
 
   Get-ChildItem $installDir -Recurse -File | Unblock-File

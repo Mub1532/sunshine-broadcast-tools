@@ -3,7 +3,7 @@
 . "$PSScriptRoot\utils.ps1"
 
 if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
-  Show-Message $scriptConfig.sunshineMissing 'Error' | Out-Null
+  Show-Message $messageConfig.sunshineMissing 'Error' | Out-Null
   exit 1
 }
 
@@ -37,7 +37,7 @@ if (Test-Path $sunshineConf) {
   $portLine = Select-String -Path $sunshineConf -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
   if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
-$readyMessage = Format-Text $scriptConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
+$readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
 $progressForm = New-Object System.Windows.Forms.Form -Property @{
   Text            = $scriptConfig.title
@@ -48,7 +48,7 @@ $progressForm = New-Object System.Windows.Forms.Form -Property @{
   TopMost         = $true
 }
 $progressForm.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-  Text      = $scriptConfig.starting
+  Text      = $messageConfig.starting
   Dock      = 'Fill'
   TextAlign = 'MiddleCenter'
   Font      = New-Object System.Drawing.Font('Segoe UI', 11)
@@ -65,7 +65,7 @@ if (-not (Test-SunshineReady)) {
   if (-not (Wait-Until { Test-SunshineReady } 60)) {
     & (Join-Path $appDir 'broadcast.ps1') stop
     $progressForm.Close()
-    Show-Message $scriptConfig.startFailed 'Error' | Out-Null
+    Show-Message $messageConfig.startFailed 'Error' | Out-Null
     exit 1
   }
 }

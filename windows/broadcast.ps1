@@ -14,6 +14,21 @@ function Restore-Speakers {
   & $svclPath /SetVolume $cableId 100
 }
 
+function Read-NewLogLines {
+  if (-not (Test-Path $sunshineLogPath)) { return @() }
+  $logLength = (Get-Item $sunshineLogPath).Length
+  if ($logLength -lt $script:logPosition) { $script:logPosition = 0 }
+  if ($logLength -eq $script:logPosition) { return @() }
+  $logStream = [System.IO.File]::Open($sunshineLogPath, 'Open', 'Read', 'ReadWrite')
+  try {
+    [void]$logStream.Seek($script:logPosition, 'Begin')
+    $newText = (New-Object System.IO.StreamReader($logStream)).ReadToEnd()
+  }
+  finally { $logStream.Dispose() }
+  $script:logPosition = $logLength
+  $newText -split "`r?`n"
+}
+
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
@@ -91,10 +106,16 @@ public static class DefaultOutput {
 }
 '@
 
+    $sunshineLogPath = Join-Path $sunshineConfigDir 'sunshine.log'
+    $script:logPosition = if (Test-Path $sunshineLogPath) { (Get-Item $sunshineLogPath).Length } else { 0 }
+
     while (-not $stopSignal.WaitOne(1000) -and (Get-Service $serviceName).Status -eq 'Running') {
       if ([DefaultOutput]::GetName() -match 'CABLE Input') {
         Start-Sleep -Milliseconds 500
         Restore-Speakers
+      }
+      if ((Read-NewLogLines) -match 'CLIENT DISCONNECTED|: Ping Timeout') {
+        Start-Hidden 'disconnect-notice.ps1'
       }
     }
   }

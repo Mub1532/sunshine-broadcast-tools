@@ -8,6 +8,7 @@ $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
 $scriptConfig = Get-Content (Join-Path $repoDir 'scriptConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$messageConfig = Get-Content (Join-Path $repoDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $serviceName = 'SunshineService'
 $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'
@@ -60,6 +61,6 @@ function Import-CSharp([string]$name, [string]$source, [string[]]$references = @
 }
 
 function Stop-Stream {
-  Start-Process sc.exe "stop $serviceName" -WindowStyle Hidden -Wait
   & (Join-Path $appDir 'broadcast.ps1') stop
+  Start-Process sc.exe "stop $serviceName" -WindowStyle Hidden -Wait
 }

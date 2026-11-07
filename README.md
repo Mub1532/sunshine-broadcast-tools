@@ -58,3 +58,13 @@ WIP
 **Presenter:** double-click **Start Stream** → wait for the message → present → click **End Stream** on the webcam overlay (or the **End Stream** shortcut).
 
 **Viewer:** open Moonlight → select the host → **Broadcast Desktop**.
+
+## Setup for classes
+
+To install with the class-specific messages (for example, the disconnect message mentions the TV upstairs), run this in **PowerShell** instead:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Mub1532/sunshine-broadcast-tools/main/windows/install.ps1))) -Class
+```
+
+**Note:** this sets the messages to be specific for the class. They can be changed any time in `messageConfig.json`.

@@ -112,7 +112,7 @@ if ($applyFrom) {
 }
 
 if (-not (Test-Path $svclPath)) {
-  Show-Message (Format-Text $scriptConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
+  Show-Message (Format-Text $messageConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
   exit 1
 }
 
@@ -121,7 +121,7 @@ Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,D
 $audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
 Remove-Item $deviceCsv -ErrorAction SilentlyContinue
 if (-not $audioDevices) {
-  Show-Message $scriptConfig.devicesUnreadable 'Error' | Out-Null
+  Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
   exit 1
 }
 
@@ -191,15 +191,15 @@ $copyButton.Enabled = [bool]$audioSink
 $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 
 $warnings = @()
-if (-not $cable) { $warnings += $scriptConfig.cableMissing }
-if (-not (Test-Path $libmpvPath)) { $warnings += $scriptConfig.mpvMissing }
+if (-not $cable) { $warnings += $messageConfig.cableMissing }
+if (-not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
 }
 
 function Save-Config {
   if ($speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) {
-    Show-Message $scriptConfig.selectDevices 'Warning' | Out-Null
+    Show-Message $messageConfig.selectDevices 'Warning' | Out-Null
     return $false
   }
   try {
@@ -211,7 +211,7 @@ function Save-Config {
     $true
   }
   catch {
-    Show-Message (Format-Text $scriptConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+    Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
     $false
   }
 }
@@ -227,16 +227,16 @@ function Invoke-Apply {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
       -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     switch ($applyProcess.ExitCode) {
-      0 { Show-Message $scriptConfig.applied | Out-Null }
-      3 { Show-Message "$($scriptConfig.applied)`n`n$($scriptConfig.restarted)" | Out-Null }
+      0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null }
+      3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null }
       default {
         $details = if (Test-Path $errorPath) { Get-Content $errorPath -Raw } else { '' }
-        Show-Message (Format-Text $scriptConfig.applyFailed @{ error = $details }) 'Error' | Out-Null
+        Show-Message (Format-Text $messageConfig.applyFailed @{ error = $details }) 'Error' | Out-Null
       }
     }
   }
   catch {
-    Show-Message $scriptConfig.adminRequired 'Warning' | Out-Null
+    Show-Message $messageConfig.adminRequired 'Warning' | Out-Null
   }
   Remove-Item $requestPath, $errorPath -ErrorAction SilentlyContinue
 }
@@ -244,7 +244,7 @@ function Invoke-Apply {
 $saveButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.saveButton; Height = 34 }) 0 20 120
 $applyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.applyButton; Height = 34 }) 50 300 180
 $applyButton.Enabled = [bool]$audioSink
-$saveButton.Add_Click({ if (Save-Config) { Show-Message $scriptConfig.saved | Out-Null } })
+$saveButton.Add_Click({ if (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null } })
 $applyButton.Add_Click({ Invoke-Apply })
 
 $setupForm.ClientSize = New-Object System.Drawing.Size(500, $script:nextTop)

@@ -388,7 +388,7 @@ $overlay.MicrophoneToggled = [Action[bool]]{
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
 }
 $overlay.Add_EndRequested({
-  if ((Show-Message $scriptConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
+  if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
 })
 
 [System.Windows.Forms.Application]::Run($overlay)
