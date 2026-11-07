@@ -69,11 +69,11 @@ function Grant-ServiceControl {
   sc.exe config $serviceName start= demand | Out-Null
 }
 
-function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [string]$icon) {
+function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [string]$icon, [string]$folder = (Join-Path $env:PUBLIC 'Desktop'), [string]$arguments = '') {
   $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut((Join-Path $env:PUBLIC "Desktop\$name.lnk"))
+  $shortcut = $shell.CreateShortcut((Join-Path $folder "$name.lnk"))
   $shortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'
-  $shortcut.Arguments = (Get-HiddenCommand $script) -replace '^conhost\.exe ', ''
+  $shortcut.Arguments = (Get-HiddenCommand $script $arguments) -replace '^conhost\.exe ', ''
   $shortcut.Description = $tip
   $shortcut.IconLocation = $icon
   $shortcut.Save()
@@ -91,6 +91,8 @@ if ($applyFrom) {
       'Shortcuts' = {
         New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
         New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
+        $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
+        New-DesktopShortcut 'Sunshine Broadcast Cleanup' 'broadcast.ps1' 'Restore audio if a stream was left running' "$env:windir\System32\shell32.dll,27" $startupFolder 'cleanup'
       }
     }
     foreach ($step in $steps.GetEnumerator()) {

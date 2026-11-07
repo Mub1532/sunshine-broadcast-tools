@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory)][ValidateSet('start', 'stop', 'release', 'guard')][string]$action,
+  [Parameter(Mandatory)][ValidateSet('start', 'stop', 'release', 'guard', 'cleanup')][string]$action,
   [switch]$session
 )
 
@@ -31,6 +31,7 @@ function Read-NewLogLines {
 
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
+  Remove-Item $streamActivePath -ErrorAction SilentlyContinue
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
   $overlayClose = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($overlayCloseName, [ref]$overlayClose)) { [void]$overlayClose.Set() }
@@ -42,10 +43,12 @@ function Stop-Broadcast {
 # the actions that happens when someone connect to the sunshine client, eg start for when they connect, stop when they disconnect, and guard is for when sunshine auto sets the default speaker to the cable etc, this makes the normal speaker the set one
 switch ($action) {
   'start' {
+    New-Item $streamActivePath -ItemType File -Force | Out-Null
     & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
     & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
   }
   'stop' { Stop-Broadcast }
+  'cleanup' { if (Test-Path $streamActivePath) { Stop-Broadcast } }
   'release' {
     $sessionLock = $null
     if ([System.Threading.Mutex]::TryOpenExisting($sessionLockName, [ref]$sessionLock)) { Restore-Speakers }
@@ -109,14 +112,45 @@ public static class DefaultOutput {
     $sunshineLogPath = Join-Path $sunshineConfigDir 'sunshine.log'
     $script:logPosition = if (Test-Path $sunshineLogPath) { (Get-Item $sunshineLogPath).Length } else { 0 }
 
+    $sleepEventTypes = 4
+    $wakeEventTypes = 7, 18
+    Register-WmiEvent -Class Win32_PowerManagementEvent -SourceIdentifier 'PowerChange' | Out-Null
+    $wentToSleep = $false
+    $hasWoken = $false
+
     while (-not $stopSignal.WaitOne(1000) -and (Get-Service $serviceName).Status -eq 'Running') {
+      $powerEvents = @(Get-Event -SourceIdentifier 'PowerChange' -ErrorAction SilentlyContinue)
+      if ($powerEvents) {
+        $powerEventTypes = $powerEvents | ForEach-Object { $_.SourceEventArgs.NewEvent.EventType }
+        $powerEvents | Remove-Event
+        $hasWoken = [bool]($powerEventTypes | Where-Object { $_ -in $wakeEventTypes })
+        if ($hasWoken -or ($powerEventTypes | Where-Object { $_ -in $sleepEventTypes })) {
+          $wentToSleep = $true
+          Stop-Stream
+          break
+        }
+      }
       if ([DefaultOutput]::GetName() -match 'CABLE Input') {
         Start-Sleep -Milliseconds 500
         Restore-Speakers
       }
       if ((Read-NewLogLines) -match 'CLIENT DISCONNECTED|: Ping Timeout') {
-        Start-Hidden 'disconnect-notice.ps1'
+        Start-Hidden 'notice.ps1' '-messageKey disconnected'
       }
     }
+
+    if ($wentToSleep) {
+      while (-not $hasWoken) {
+        $powerEvent = Wait-Event -SourceIdentifier 'PowerChange' -Timeout 86400
+        if (-not $powerEvent) { break }
+        $hasWoken = $powerEvent.SourceEventArgs.NewEvent.EventType -in $wakeEventTypes
+        $powerEvent | Remove-Event
+      }
+      if ($hasWoken) {
+        if ((Get-Service $serviceName).Status -ne 'Stopped' -or (Test-Path $streamActivePath)) { Stop-Stream }
+        Start-Hidden 'notice.ps1' '-messageKey sleepEnded'
+      }
+    }
+    Unregister-Event -SourceIdentifier 'PowerChange' -ErrorAction SilentlyContinue
   }
 }

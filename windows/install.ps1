@@ -47,6 +47,17 @@ try {
   Copy-Item (Join-Path $tempDir "$repoName-$branch") $installDir -Recurse
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
+  $messagesPath = Join-Path $installDir 'messageConfig.json'
+  $defaultMessages = Get-Content (Join-Path $tempDir "$repoName-$branch\messageConfig.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })
+  if ($missingMessages) {
+    $newLines = $missingMessages | ForEach-Object { "  `"$($_.Name)`": `"$($_.Value.Replace('\', '\\').Replace('"', '\"').Replace("`n", '\n'))`"" }
+    $messagesText = (Get-Content $messagesPath -Raw -Encoding UTF8).TrimEnd().TrimEnd('}').TrimEnd()
+    $messagesText = "$messagesText,`n`n$($newLines -join ",`n")`n}`n"
+    [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
+  }
+
   $svclPath = Join-Path $windowsDir 'svcl.exe'
   if (-not (Test-Path $svclPath)) {
     Write-Host 'Downloading svcl...'

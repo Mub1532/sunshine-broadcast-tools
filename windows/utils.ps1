@@ -17,6 +17,7 @@ $stopEventName = 'Local\SunshineBroadcastStop'
 $sessionLockName = 'Local\SunshineBroadcastSession'
 $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
 $overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
+$streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
