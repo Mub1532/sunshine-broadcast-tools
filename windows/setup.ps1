@@ -106,7 +106,6 @@ if ($applyFrom) {
       'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
         New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
-        New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
         New-DesktopShortcut 'Sunshine Broadcast Cleanup' 'broadcast.ps1' 'Restore audio if a stream was left running' "$env:windir\System32\shell32.dll,27" $startupFolder 'cleanup'
       }
