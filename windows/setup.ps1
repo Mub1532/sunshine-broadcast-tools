@@ -6,13 +6,17 @@ function Write-Utf8File([string]$path, [string]$content) {
   [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Update-SunshineConf([string]$audioSink) {
+function Update-SunshineConf([string]$audioSink, $options) {
+  $wanted = [ordered]@{}
+  if ($options.disableInput) { $wanted.keyboard = 'disabled'; $wanted.mouse = 'disabled'; $wanted.controller = 'disabled' }
+  if ($options.vigemDriver) { $wanted.gamepad_driver = 'vigembus' }
   $confPath = Join-Path $sunshineConfigDir 'sunshine.conf'
   $keptLines = @()
   if (Test-Path $confPath) {
     Copy-Item $confPath "$confPath.bak" -Force
     foreach ($line in Get-Content $confPath) {
       if ($line -match '^\s*(audio_sink|virtual_sink)\s*=') { continue }
+      if ($line -match '^\s*(\w+)\s*=' -and $wanted.Contains($Matches[1])) { continue }
       if ($line -match '^\s*global_prep_cmd\s*=\s*(.+)$') {
         $otherCommands = @(($Matches[1] | ConvertFrom-Json) | Where-Object { $_.do -notmatch '(stream|broadcast)\.ps1' })
         if ($otherCommands.Count) { $keptLines += 'global_prep_cmd = ' + (ConvertTo-Json -InputObject $otherCommands -Compress -Depth 3) }
@@ -22,10 +26,11 @@ function Update-SunshineConf([string]$audioSink) {
     }
   }
   $keptLines += "audio_sink = $audioSink"
+  foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps {
+function Update-SunshineApps([bool]$removeOthers) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -43,7 +48,8 @@ function Update-SunshineApps {
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $apps.apps = @($apps.apps | Where-Object { $_.name -ne $scriptConfig.appName }) + $broadcastApp
+  $otherApps = if ($removeOthers) { @() } else { @($apps.apps | Where-Object { $_.name -ne $scriptConfig.appName }) }
+  $apps.apps = $otherApps + $broadcastApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
 
@@ -58,6 +64,15 @@ function Add-FirewallRules {
   $sunshinePath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
   Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   New-NetFirewallRule -DisplayName 'Sunshine Broadcast' -Direction Inbound -Program $sunshinePath -Action Allow -Profile Any | Out-Null
+}
+
+function Set-DefaultCredentials {
+  $statePath = Join-Path $sunshineConfigDir 'sunshine_state.json'
+  if (Test-Path $statePath) {
+    $state = Get-Content $statePath -Raw | ConvertFrom-Json
+    if ($state.username) { return }
+  }
+  & (Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe') --creds admin admin | Out-Null
 }
 
 function Grant-ServiceControl {
@@ -86,8 +101,9 @@ if ($applyFrom) {
     $steps = [ordered]@{
       'Service'   = { Install-SunshineService; Grant-ServiceControl }
       'Firewall'  = { Add-FirewallRules }
-      'Config'    = { Update-SunshineConf $request.audioSink }
-      'Apps'      = { Update-SunshineApps }
+      'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
+      'Config'    = { Update-SunshineConf $request.audioSink $request.options }
+      'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
         New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
         New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
@@ -192,11 +208,24 @@ $copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text 
 $copyButton.Enabled = [bool]$audioSink
 $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 
+$optionBoxes = [ordered]@{}
+foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver') {
+  $checked = [bool]$savedConfig.options.$option
+  $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; Height = 22 }) 26
+}
+$script:nextTop += 10
+
 $warnings = @()
 if (-not $cable) { $warnings += $messageConfig.cableMissing }
 if (-not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
+}
+
+function Get-Options {
+  $options = [ordered]@{}
+  foreach ($box in $optionBoxes.GetEnumerator()) { $options[$box.Key] = $box.Value.Checked }
+  $options
 }
 
 function Save-Config {
@@ -209,6 +238,7 @@ function Save-Config {
       speakers   = $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID'
       microphone = $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID'
       camera     = [string]$cameraList.SelectedItem
+      options    = Get-Options
     } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
     $true
   }
@@ -223,7 +253,7 @@ function Invoke-Apply {
   $requestPath = Join-Path $env:TEMP 'sunshine-broadcast-apply.json'
   $errorPath = "$requestPath.err"
   Remove-Item $errorPath -ErrorAction SilentlyContinue
-  @{ audioSink = $audioSink } | ConvertTo-Json | Set-Content $requestPath
+  @{ audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
 
   try {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
