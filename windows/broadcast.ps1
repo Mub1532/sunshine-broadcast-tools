@@ -134,8 +134,10 @@ public static class DefaultOutput {
         Start-Sleep -Milliseconds 500
         Restore-Speakers
       }
-      if ((Read-NewLogLines) -match 'CLIENT DISCONNECTED|: Ping Timeout') {
-        Start-Hidden 'notice.ps1' '-messageKey disconnected'
+      $disconnectLine = (Read-NewLogLines) -match 'CLIENT DISCONNECTED|: Ping Timeout' | Select-Object -Last 1
+      if ($disconnectLine) {
+        $reason = if ($disconnectLine -match 'Ping Timeout') { 'Ping Timeout' } else { 'CLIENT DISCONNECTED' }
+        Start-Hidden 'notice.ps1' "-messageKey disconnected -reason `"$reason`""
       }
     }
 

@@ -7,6 +7,7 @@
   "endConfirm": "End the stream?\n\nThe stream will disconnect and Sunshine will stop.",
   "ended": "Stream ended.",
   "disconnected": "Device Disconnected. If this was not on purpose, please reconnect it.",
+  "disconnectedVia": "Disconnected via: {reason}",
   "sleepEnded": "Sunshine stream ended because you put the laptop to sleep.",
 
   "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",
