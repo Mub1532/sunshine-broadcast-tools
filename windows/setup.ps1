@@ -210,7 +210,7 @@ $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 $optionBoxes = [ordered]@{}
 foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver') {
   $checked = [bool]$savedConfig.options.$option
-  $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; Height = 22 }) 26
+  $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; AutoSize = $true }) 26
 }
 $script:nextTop += 10
 
@@ -278,7 +278,8 @@ $applyButton.Add_Click({
   elseif (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
 })
 
-$setupForm.ClientSize = New-Object System.Drawing.Size(500, $script:nextTop)
+$formWidth = [Math]::Max(500, ($optionBoxes.Values | ForEach-Object { $_.Right } | Measure-Object -Maximum).Maximum + 20)
+$setupForm.ClientSize = New-Object System.Drawing.Size($formWidth, $script:nextTop)
 $setupForm.Add_Shown({
   Show-OnTop $setupForm
   $setupForm.TopMost = $false
