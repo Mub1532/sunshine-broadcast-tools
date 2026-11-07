@@ -6,7 +6,8 @@
 
   "endConfirm": "End the stream?\n\nThe stream will disconnect and Sunshine will stop.",
   "ended": "Stream ended.",
-  "disconnected": "Device Disconnected. If this was not on purpose, please reconnect it.",
+  "disconnected": "{device} Disconnected. If this was not on purpose, please go to {device} and connect again.",
+  "unknownDevice": "the device",
   "disconnectedVia": "Disconnected via: {reason}",
   "sleepEnded": "Sunshine stream ended because you put the laptop to sleep.",
 

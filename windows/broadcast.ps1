@@ -44,6 +44,7 @@ function Stop-Broadcast {
 switch ($action) {
   'start' {
     New-Item $streamActivePath -ItemType File -Force | Out-Null
+    Set-Content $clientNamePath ([string]$env:SUNSHINE_CLIENT_NAME) -Encoding UTF8
     & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
     & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
   }

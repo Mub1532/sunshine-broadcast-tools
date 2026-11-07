@@ -1,5 +1,3 @@
-param([switch]$Class)
-
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
@@ -48,6 +46,10 @@ try {
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
   $messagesPath = Join-Path $installDir 'messageConfig.json'
+  $oldDisconnectMessages = 'Device Disconnected. If this was not on purpose, please reconnect it.', 'Device Disconnected. If this was not on purpose, please reconnect it (TV upstairs).'
+  $messagesText = Get-Content $messagesPath -Raw -Encoding UTF8
+  foreach ($oldMessage in $oldDisconnectMessages) { $messagesText = $messagesText.Replace("`"$oldMessage`"", "`"{device} Disconnected. If this was not on purpose, please go to {device} and connect again.`"") }
+  [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
   $defaultMessages = Get-Content (Join-Path $tempDir "$repoName-$branch\messageConfig.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })
@@ -77,17 +79,6 @@ try {
     tar.exe -xf (Get-Download $asset.browser_download_url 'mpv.7z') -C $mpvDir
     if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
     Copy-Item (Get-ChildItem $mpvDir -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
-  }
-
-  if ($Class) {
-    $messagesPath = Join-Path $installDir 'messageConfig.json'
-    $messagesText = Get-Content $messagesPath -Raw -Encoding UTF8
-    $preset = Get-Content (Join-Path $installDir 'presets\class.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($message in $preset.PSObject.Properties) {
-      $escapedValue = $message.Value.Replace('\', '\\').Replace('"', '\"')
-      $messagesText = $messagesText -replace "(?m)^(\s*`"$($message.Name)`"\s*:\s*)`".*?(?<!\\)`"", "`${1}`"$escapedValue`""
-    }
-    [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
   }
 
   Get-ChildItem $installDir -Recurse -File | Unblock-File
