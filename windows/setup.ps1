@@ -48,7 +48,7 @@ function Update-SunshineApps([bool]$removeOthers) {
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $otherApps = if ($removeOthers) { @() } else { @($apps.apps | Where-Object { $_.name -ne $scriptConfig.appName }) }
+  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -ne $scriptConfig.appName })
   $apps.apps = $otherApps + $broadcastApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
