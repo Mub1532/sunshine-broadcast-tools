@@ -259,8 +259,8 @@ function Invoke-Apply {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
       -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     switch ($applyProcess.ExitCode) {
-      0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null }
-      3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null }
+      0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
+      3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
       default {
         $details = if (Test-Path $errorPath) { Get-Content $errorPath -Raw } else { '' }
         Show-Message (Format-Text $messageConfig.applyFailed @{ error = $details }) 'Error' | Out-Null
@@ -273,11 +273,11 @@ function Invoke-Apply {
   Remove-Item $requestPath, $errorPath -ErrorAction SilentlyContinue
 }
 
-$saveButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.saveButton; Height = 34 }) 0 20 120
 $applyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.applyButton; Height = 34 }) 50 300 180
-$applyButton.Enabled = [bool]$audioSink
-$saveButton.Add_Click({ if (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null } })
-$applyButton.Add_Click({ Invoke-Apply })
+$applyButton.Add_Click({
+  if ($audioSink) { Invoke-Apply }
+  elseif (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
+})
 
 $setupForm.ClientSize = New-Object System.Drawing.Size(500, $script:nextTop)
 $setupForm.Add_Shown({
