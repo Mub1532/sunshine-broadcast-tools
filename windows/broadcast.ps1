@@ -55,6 +55,7 @@ switch ($action) {
   'stop' { Stop-Broadcast }
   'cleanup' { if (Test-Path $streamActivePath) { Stop-Broadcast } }
   'release' {
+    if ($isCasting) { return }
     $sessionLock = $null
     if ([System.Threading.Mutex]::TryOpenExisting($sessionLockName, [ref]$sessionLock)) { Restore-Speakers }
     else { Stop-Broadcast }
