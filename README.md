@@ -21,35 +21,62 @@ Anyone who wants to show a computer's screen, face and voice on another screen o
 - Presentations or meetings shown on a TV elsewhere in the building
 - Any setup where the presenter should only need to click **Start** and **End**
 
+## Modes
+
+- **Casting** - shows the screen and the computer's sound on the TV. No camera or microphone.
+- **Broadcast** - shows the screen, a webcam overlay and the microphone on the TV, while the computer's own sound keeps playing in the room.
+
 ## Requirements
 
-- **[Sunshine](https://github.com/LizardByte/Sunshine)** - Streaming server used to broadcast to Moonlight clients.
-- **[Moonlight](https://moonlight-stream.org/)** - Client used to receive and view the stream.
-- **[VLC Media Player](https://www.videolan.org/vlc/)** - Used to display the webcam overlay.
-- **[svcl](https://www.nirsoft.net/utils/sound_volume_command_line.html)** (SoundVolumeCommandLine by NirSoft) - Command-line tool for switching audio devices and routing the microphone. Download the x64 zip and place `svcl.exe` in the same folder as the scripts.
-- **[VB-Audio Virtual Cable](https://vb-audio.com/Cable/)** - Virtual audio device used for routing microphone audio into the stream. Run the installer as administrator, then restart.
+- **[Sunshine](https://github.com/LizardByte/Sunshine)** - Streaming server used to broadcast to Moonlight clients. Installed automatically if missing.
+- **[Moonlight](https://moonlight-stream.org/)** - Client used on the viewing device to receive and view the stream.
 
-### Sunshine settings to change
+### Extra requirements for broadcast
 
-- **Input:** if you don't want the viewer to be able to control the host PC, disable **keyboard**, **mouse** and **gamepad/controller** inputs (and others if there are others) in the Input/Output section of Sunshine config.
+Setup downloads and installs these automatically when broadcast is chosen:
+
+- **[VB-Audio Virtual Cable](https://vb-audio.com/Cable/)** - Virtual audio device used for routing microphone audio into the stream. Needs a restart after installing.
+- **[svcl](https://www.nirsoft.net/utils/sound_volume_command_line.html)** (SoundVolumeCommandLine by NirSoft) - Command-line tool for switching audio devices and routing the microphone.
+- **[libmpv](https://github.com/shinchiro/mpv-winbuild-cmake)** - Used to display the webcam overlay.
 
 ### Moonlight settings to change
 
-- Turn on **Play audio on host PC**, so sound still plays from the host's speakers.
+- Make sure host audio is **not muted**: untick **Mute host PC speakers while streaming** (PC), or turn on **Play audio on PC** (Android/Google TV). Otherwise the computer's own speakers go quiet while streaming.
 
 # Installation
 
 ## Windows
 
-Open **PowerShell** and run:
+Open **PowerShell as administrator** (not CMD) and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/Mub1532/sunshine-broadcast-tools/main/windows/install.ps1 | iex
 ```
 
-This downloads the latest version, installs it to `C:\ProgramData\sunshine-broadcast-tools` and opens Setup. Run the same command again to update.
+This installs everything to `C:\ProgramData\sunshine-broadcast-tools` and opens Setup.
 
-In Setup, choose the speakers, microphone, camera and any options, then click **Save / Apply to Sunshine**. Setup closes once it's done.
+In Setup, choose a mode:
+
+- **Setup for casting** - pick the options, then click **Save / Apply to Sunshine**.
+- **Setup for broadcast** - installs the extra requirements if needed, then pick the speakers, microphone, camera and options, and click **Save / Apply to Sunshine**.
+
+The options can:
+
+- set a default Sunshine login (admin / admin) if none is set
+- remove the other Sunshine apps, so only **Desktop Broadcast** shows
+- stop the viewer controlling the PC (keyboard, mouse and controller)
+- set the gamepad driver to ViGEmBus
+- stop Sunshine installing the Steam audio drivers
+
+Then pair Moonlight with Sunshine using the PIN.
+
+To change mode or settings later, open **Sunshine Broadcast Setup** in `C:\ProgramData\sunshine-broadcast-tools`.
+
+## Updates
+
+When an update is available, **Start Sunshine Stream** asks to update first. Click **Update Now** or **Later**.
+
+If an update causes problems, open Setup and click **Undo last update** to go back to the previous version.
 
 ## Linux
 
@@ -57,6 +84,10 @@ WIP
 
 ## Usage
 
-**Presenter:** double-click **Start Stream** → wait for the message → present → click **End Stream** on the webcam overlay (or the **End Stream** shortcut).
+**Presenter:** double-click **Start Sunshine Stream** → wait for the message → present → click **End Stream** on the webcam overlay (broadcast) or the floating **End Stream** button (casting).
 
-**Viewer:** open Moonlight → select the host → **Broadcast Desktop**.
+**Viewer:** open Moonlight → select the host → **Desktop Broadcast**.
+
+The stream also ends by itself if the computer is put to sleep, the lid is closed or it's shut down. If the viewer disconnects, the presenter gets a popup saying so.
+
+The popup messages can be changed in `messageConfig.json`.
