@@ -147,9 +147,20 @@ public class LidWatcher : NativeWindow {
     $wentToSleep = $false
     $hasWoken = $false
 
+    try {
+      $standbyQuery = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('System', 'LogName', "*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=506)]]")
+      $standbyWatcher = New-Object System.Diagnostics.Eventing.Reader.EventLogWatcher($standbyQuery)
+      Register-ObjectEvent $standbyWatcher EventRecordWritten -SourceIdentifier 'Standby' | Out-Null
+      $standbyWatcher.Enabled = $true
+    }
+    catch {}
+    $lastTick = Get-Date
     while (-not $stopSignal.WaitOne(1000) -and (Get-Service $serviceName).Status -eq 'Running') {
       [System.Windows.Forms.Application]::DoEvents()
-      if ($lidWatcher.Closed) {
+      $wasFrozen = ((Get-Date) - $lastTick).TotalSeconds -gt 5
+      $lastTick = Get-Date
+      $enteredStandby = [bool](Get-Event -SourceIdentifier 'Standby' -ErrorAction SilentlyContinue)
+      if ($lidWatcher.Closed -or $wasFrozen -or $enteredStandby) {
         $lidClosed = $true
         Start-Hidden 'notice.ps1' '-messageKey sleepEnded -stoppingKey stoppingLidClosed'
         break
@@ -189,5 +200,6 @@ public class LidWatcher : NativeWindow {
       }
     }
     Unregister-Event -SourceIdentifier 'PowerChange' -ErrorAction SilentlyContinue
+    Unregister-Event -SourceIdentifier 'Standby' -ErrorAction SilentlyContinue
   }
 }
