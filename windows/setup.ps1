@@ -465,9 +465,8 @@ if ($applyFrom -or $repair) {
       'Ports'     = { Set-SunshinePorts }
       'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
       'Apps'      = {
-        $runnerProblem = Install-WorkingRunner
-        Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) ($request.options.runAsAdmin -ne $false) (-not $runnerProblem)
-        if ($runnerProblem) { throw $runnerProblem }
+        $script:runnerProblem = Install-WorkingRunner
+        Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) ($request.options.runAsAdmin -ne $false) (-not $script:runnerProblem)
       }
       'Shortcuts' = {
         # with run as admin unticked the start shortcut opens without admin, and only asks for admin when something needs fixing
@@ -482,6 +481,12 @@ if ($applyFrom -or $repair) {
       catch { $failures += "$($step.Key): $($_.Exception.Message)" }
     }
     if ($failures) { throw ($failures -join "`n") }
+    # run-hidden not working isnt a failure, sunshine is already set to the old method. the reason goes in the debug log and a small note shows
+    if ($script:runnerProblem) {
+      New-Item (Split-Path $debugLogPath) -ItemType Directory -Force | Out-Null
+      Add-Content $debugLogPath "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  setup: $($script:runnerProblem)"
+      if (-not $repair) { Show-Message $messageConfig.runnerFallback 'Information' | Out-Null }
+    }
     if ($repair) { exit 0 }
 
     if ((Get-Service $serviceName).Status -eq 'Running') {
