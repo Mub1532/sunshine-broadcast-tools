@@ -41,7 +41,8 @@ Setup downloads and installs these automatically when broadcast is chosen:
 
 ### Moonlight settings to change
 
-- Make sure host audio is **not muted**: untick **Mute host PC speakers while streaming** (PC), or turn on **Play audio on PC** (Android/Google TV). Otherwise the computer's own speakers go quiet while streaming.
+- **Broadcast:** host audio must **not be muted**: untick **Mute host PC speakers while streaming** (PC), or turn on **Play audio on PC** (Android/Google TV). Devices with it muted are refused, with a popup on the computer saying how to fix it.
+- **Casting:** either works. Muted plays the sound only on the TV, unmuted plays it on both.
 
 # Installation
 
@@ -63,7 +64,7 @@ In Setup, choose a mode:
 The options can:
 
 - set a default Sunshine login (admin / admin) if none is set
-- remove the other Sunshine apps, so only **Desktop Broadcast** shows
+- remove the other Sunshine apps, so only **Desktop Broadcast** (broadcast) or **Desktop** (casting) shows
 - stop the viewer controlling the PC (keyboard, mouse and controller)
 - set the gamepad driver to ViGEmBus
 - stop Sunshine installing the Steam audio drivers
@@ -86,7 +87,7 @@ WIP
 
 **Presenter:** double-click **Start Sunshine Stream** → wait for the message → present → click **End Stream** on the webcam overlay (broadcast), or click the red record icon in the system tray → **End Stream** (both modes).
 
-**Viewer:** open Moonlight → select the host → **Desktop Broadcast**.
+**Viewer:** open Moonlight → select the host → **Desktop Broadcast** (broadcast) or **Desktop** (casting).
 
 The stream also ends by itself if the computer is put to sleep, the lid is closed or it's shut down. If the viewer disconnects, the presenter gets a popup saying so.
 
