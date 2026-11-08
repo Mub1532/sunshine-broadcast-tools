@@ -162,6 +162,10 @@ function New-EndTrayIcon([scriptblock]$onEnd) {
     ContextMenuStrip = $menu
     Visible          = $true
   }
+  $tray.Add_MouseUp({
+    param($sender, $click)
+    if ($click.Button -eq 'Left') { $sender.GetType().GetMethod('ShowContextMenu', [Reflection.BindingFlags]'Instance, NonPublic').Invoke($sender, $null) }
+  })
   $tray
 }
 

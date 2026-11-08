@@ -320,6 +320,14 @@ public class OverlayForm : Form {
     if (player == IntPtr.Zero || !cameraOn) base.OnPaintBackground(args);
   }
 
+  protected override void OnLocationChanged(EventArgs args) {
+    base.OnLocationChanged(args);
+    var area = Screen.FromControl(this).WorkingArea;
+    int x = Math.Max(area.Left, Math.Min(Left, area.Right - Width));
+    int y = Math.Max(area.Top, Math.Min(Top, area.Bottom - Height));
+    if (x != Left || y != Top) Location = new Point(x, y);
+  }
+
   protected override void OnResize(EventArgs args) {
     base.OnResize(args);
     if (endButton != null) PlaceButtons();
