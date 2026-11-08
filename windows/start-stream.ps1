@@ -57,7 +57,7 @@ if (-not $skipUpdateCheck) {
   $latestCommit = Get-LatestCommit $installed.branch
   if ($latestCommit -and $latestCommit -ne $installed.commit) {
     $progressForm.Hide()
-    $choice = Show-Choice $messageConfig.updateAvailable @($messageConfig.updateNow, $messageConfig.updateLater, $messageConfig.updateSkip)
+    $choice = Show-Choice $messageConfig.updateAvailable @($messageConfig.updateNow, $messageConfig.updateSkip)
     $progressForm.Show()
     Show-OnTop $progressForm
     $updateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'update.ps1')`" -branch $($installed.branch) -commit $latestCommit"
@@ -73,10 +73,6 @@ if (-not $skipUpdateCheck) {
         }
         Show-Message $messageConfig.updateFailed 'Warning' | Out-Null
       }
-      catch {}
-    }
-    elseif ($choice -eq 1) {
-      try { Start-Process powershell "$updateArgs -afterStream" -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP }
       catch {}
     }
   }
