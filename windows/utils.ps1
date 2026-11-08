@@ -28,6 +28,7 @@ $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-n
 $versionPath = Join-Path $repoDir 'version.json'
 $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
 $launcherVersion = '2.0.1.0'
+$runnerPath = Join-Path $appDir 'run-hidden.exe'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }

@@ -14,7 +14,7 @@ $silent = [bool]$sbtSilent
 $commit = [string]$sbtCommit
 $installDir = Join-Path $env:ProgramData $repoName
 $windowsDir = Join-Path $installDir 'windows'
-$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe', 'broadcast-config-backup', 'casting-config-backup'
+$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe', 'windows\run-hidden.exe', 'broadcast-config-backup', 'casting-config-backup'
 
 $tempDir = Join-Path $env:TEMP "$repoName-install"
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue

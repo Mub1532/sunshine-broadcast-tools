@@ -58,7 +58,7 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
     'name'       = $scriptConfig.appName
     'image-path' = Join-Path $repoDir 'images\desktop-broadcast.png'
     'prep-cmd'   = @([pscustomobject][ordered]@{
-        do       = Get-HiddenCommand 'broadcast.ps1' 'start'
+        do       = "`"$runnerPath`" broadcast.ps1 start"
         undo     = Get-HiddenCommand 'broadcast.ps1' 'release'
         elevated = $false
       })
@@ -77,6 +77,37 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
     })
   $apps.apps = $otherApps + $modeApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
+}
+
+function Install-Runner {
+  $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-runner'
+  New-Item $buildDir -ItemType Directory -Force | Out-Null
+  $sourcePath = Join-Path $buildDir 'runner.cs'
+  Write-Utf8File $sourcePath @'
+using System;
+using System.Diagnostics;
+using System.IO;
+
+static class Runner {
+  static int Main(string[] args) {
+    if (args.Length == 0) return 1;
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
+    string extra = string.Join(" ", args, 1, args.Length - 1);
+    var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
+      UseShellExecute = false,
+      CreateNoWindow = true
+    });
+    process.WaitForExit();
+    return process.ExitCode;
+  }
+}
+'@
+  $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  try {
+    $compilerOutput = & $compiler /nologo /target:winexe "/out:$runnerPath" $sourcePath 2>&1
+    if ($LASTEXITCODE) { throw "Could not build the hidden runner: $($compilerOutput -join ' ')" }
+  }
+  finally { Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Install-SunshineService {
@@ -375,7 +406,7 @@ if ($applyFrom) {
       'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
       'Ports'     = { Set-SunshinePorts }
       'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
-      'Apps'      = { Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) }
+      'Apps'      = { Install-Runner; Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
         New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
