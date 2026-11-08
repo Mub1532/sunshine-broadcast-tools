@@ -84,6 +84,80 @@ function Grant-ServiceControl {
   sc.exe config $serviceName start= demand | Out-Null
 }
 
+$sunshineIconPath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
+
+function Install-Launcher {
+  $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid') { return $launcherPath }
+
+  $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-launcher'
+  New-Item $buildDir -ItemType Directory -Force | Out-Null
+  $sourcePath = Join-Path $buildDir 'launcher.cs'
+  $manifestPath = Join-Path $buildDir 'launcher.manifest'
+  Write-Utf8File $sourcePath @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
+
+[assembly: AssemblyTitle("Sunshine Broadcast Tools")]
+[assembly: AssemblyProduct("Sunshine Broadcast Tools")]
+[assembly: AssemblyCompany("Mubashar Khan")]
+
+static class Launcher {
+  static void Main(string[] args) {
+    if (args.Length == 0) return;
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
+    string extra = string.Join(" ", args, 1, args.Length - 1);
+    Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
+      UseShellExecute = false,
+      CreateNoWindow = true
+    });
+  }
+}
+'@
+  Write-Utf8File $manifestPath @'
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false" /></requestedPrivileges></security>
+  </trustInfo>
+</assembly>
+'@
+  $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$sunshineIconPath" $sourcePath | Out-Null
+  if ($LASTEXITCODE) { throw 'Could not build the launcher.' }
+
+  foreach ($store in 'Root', 'TrustedPublisher') {
+    Get-ChildItem "Cert:\LocalMachine\$store" | Where-Object Subject -eq 'CN=Mubashar Khan' | Remove-Item
+  }
+  $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Mubashar Khan' -FriendlyName 'Mubashar Khan Sunshine Broadcast Tools Certificate' `
+    -CertStoreLocation 'Cert:\LocalMachine\My' -NotAfter (Get-Date).AddYears(30)
+  try {
+    $publicPath = Join-Path $buildDir 'publisher.cer'
+    Export-Certificate -Cert $certificate -FilePath $publicPath | Out-Null
+    foreach ($store in 'Root', 'TrustedPublisher') { Import-Certificate -FilePath $publicPath -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null }
+    $signature = Set-AuthenticodeSignature $launcherPath $certificate -HashAlgorithm SHA256
+    if ($signature.Status -ne 'Valid') { throw "Could not sign the launcher: $($signature.StatusMessage)" }
+  }
+  finally {
+    Remove-Item "Cert:\LocalMachine\My\$($certificate.Thumbprint)" -DeleteKey
+    Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $launcherPath
+}
+
+function New-LauncherShortcut([string]$name, [string]$script, [string]$tip, [string]$icon) {
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut((Join-Path (Join-Path $env:PUBLIC 'Desktop') "$name.lnk"))
+  $shortcut.TargetPath = Install-Launcher
+  $shortcut.Arguments = $script
+  $shortcut.WorkingDirectory = $appDir
+  $shortcut.Description = $tip
+  $shortcut.IconLocation = $icon
+  $shortcut.Save()
+}
+
 function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [string]$icon, [string]$folder = (Join-Path $env:PUBLIC 'Desktop'), [string]$arguments = '') {
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut((Join-Path $folder "$name.lnk"))
@@ -105,7 +179,7 @@ if ($applyFrom) {
       'Config'    = { Update-SunshineConf $request.audioSink $request.options }
       'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
-        New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
+        New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
         New-DesktopShortcut 'Sunshine Broadcast Cleanup' 'broadcast.ps1' 'Restore audio if a stream was left running' "$env:windir\System32\shell32.dll,27" $startupFolder 'cleanup'
       }
