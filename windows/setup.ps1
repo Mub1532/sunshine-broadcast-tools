@@ -16,7 +16,7 @@ function Update-SunshineConf([string]$audioSink, $options) {
   if (Test-Path $confPath) {
     Copy-Item $confPath "$confPath.bak" -Force
     foreach ($line in Get-Content $confPath) {
-      if ($line -match '^\s*(audio_sink|virtual_sink)\s*=') { continue }
+      if ($line -match '^\s*(audio_sink|virtual_sink|external_audio)\s*=') { continue }
       if ($line -match '^\s*(\w+)\s*=' -and $wanted.Contains($Matches[1])) { continue }
       if ($line -match '^\s*global_prep_cmd\s*=\s*(.+)$') {
         $otherCommands = @(($Matches[1] | ConvertFrom-Json) | Where-Object { $_.do -notmatch '(stream|broadcast)\.ps1' })
@@ -28,6 +28,7 @@ function Update-SunshineConf([string]$audioSink, $options) {
   }
   $keptLines += "audio_sink = $audioSink"
   $keptLines += "virtual_sink = $audioSink"
+  $keptLines += "external_audio = enabled"
   foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
