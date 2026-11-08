@@ -2,6 +2,17 @@ param([string]$applyFrom, [switch]$renewLauncher)
 
 . "$PSScriptRoot\utils.ps1"
 
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+  try {
+    if (Test-Path $launcherPath) { Start-Process $launcherPath 'setup.ps1' }
+    else { Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs }
+  }
+  catch {}
+  exit
+}
+
 function Write-Utf8File([string]$path, [string]$content) {
   [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
