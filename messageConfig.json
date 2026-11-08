@@ -35,5 +35,7 @@
   "componentsFailed": "Could not install the broadcast components.\n\n{error}",
   "componentsRestart": "VB-CABLE installed. Restart the computer, then open Setup again.",
   "hostAudioOff": "{device} tried to connect, we REFUSED it because it isn’t set up properly for broadcast.\nIn Moonlight app on {device}, UNTICK “Mute host PC speakers” (for PC) or turn ON “Play audio on PC” (for Android/Google TV), then close Moonlight fully and connect again.",
-  "repairing": "Fixing Sunshine settings, please wait..."
+  "repairing": "Fixing Sunshine settings, please wait...",
+  "markedWorking": "Saved this version as the last working version. You can go back to it from Setup.",
+  "markWorkingFailed": "Could not save this version: {error}"
 }

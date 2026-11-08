@@ -1,5 +1,9 @@
 # puts back the version from before the last update (tools, sunshine config, shortcuts, service settings)
 $backupDir = $PSScriptRoot
+# the original and last working backups are kept after undoing, the normal one is removed
+$backupName = Split-Path $backupDir -Leaf
+$versionName = if ($backupName -like '*-orig') { 'original version' } elseif ($backupName -like '*-last-working') { 'last working version' } else { 'previous version' }
+$keepBackup = $versionName -ne 'previous version'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -16,7 +20,8 @@ function Show-OnTopMessage([string]$text, [string]$buttons, [string]$icon) {
   try { [System.Windows.Forms.MessageBox]::Show($owner, $text, $title, $buttons, $icon) }
   finally { $owner.Dispose() }
 }
-$answer = Show-OnTopMessage 'Undo the last update and go back to the previous version?' 'YesNo' 'Question'
+$question = if ($keepBackup) { "Go back to the $versionName?" } else { 'Undo the last update and go back to the previous version?' }
+$answer = Show-OnTopMessage $question 'YesNo' 'Question'
 if ($answer -ne 'Yes') { exit }
 
 try {
@@ -53,8 +58,8 @@ try {
   }
 
   Set-Location $env:TEMP
-  Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue
-  Show-OnTopMessage 'The previous version has been restored.' 'OK' 'Information' | Out-Null
+  if (-not $keepBackup) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
+  Show-OnTopMessage "The $versionName has been restored." 'OK' 'Information' | Out-Null
 }
 catch {
   Show-OnTopMessage "Undo failed: $($_.Exception.Message)" 'OK' 'Error' | Out-Null

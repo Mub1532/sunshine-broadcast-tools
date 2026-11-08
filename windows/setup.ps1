@@ -509,11 +509,28 @@ if ($applyFrom -or $repair) {
 $setupShown = $null
 if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
 $restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
+$originalRestoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-orig\restore.ps1'
+$lastWorkingDir = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-last-working'
+$lastWorkingRestoreScript = Join-Path $lastWorkingDir 'restore.ps1'
 $menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
-if (Test-Path $restoreScript) { $menuChoices += $scriptConfig.undoButton }
+$restoreChoices = @{}
+if (Test-Path $restoreScript) { $restoreChoices[$menuChoices.Count] = $restoreScript; $menuChoices += $scriptConfig.undoButton }
+if (Test-Path $originalRestoreScript) { $restoreChoices[$menuChoices.Count] = $originalRestoreScript; $menuChoices += $scriptConfig.undoOriginalButton }
+if (Test-Path $lastWorkingRestoreScript) { $restoreChoices[$menuChoices.Count] = $lastWorkingRestoreScript; $menuChoices += $scriptConfig.undoLastWorkingButton }
+$markWorkingChoice = $menuChoices.Count
+$menuChoices += $scriptConfig.markWorkingButton
 $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
-if ($menuChoice -eq 2) {
-  Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+if ($menuChoice -eq $markWorkingChoice) {
+  try {
+    Remove-Item $lastWorkingDir -Recurse -Force -ErrorAction SilentlyContinue
+    & "$PSScriptRoot\backup.ps1" $lastWorkingDir
+    Show-Message $messageConfig.markedWorking 'Information' | Out-Null
+  }
+  catch { Show-Message (Format-Text $messageConfig.markWorkingFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null }
+  exit
+}
+if ($restoreChoices.ContainsKey($menuChoice)) {
+  Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$($restoreChoices[$menuChoice])`""
   exit
 }
 if ($menuChoice -lt 0) { exit }
