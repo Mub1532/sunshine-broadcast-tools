@@ -522,7 +522,7 @@ if ($mode -eq 'broadcast') {
     exit 1
   }
 
-  $physicalDevices = $audioDevices | Where-Object { $_.'Device Name' -notmatch 'VB-Audio' }
+  $physicalDevices = $audioDevices | Where-Object { "$($_.Name) $($_.'Device Name')" -notmatch 'VB-Audio|Steam Streaming' }
   $speakers = @($physicalDevices | Where-Object Direction -eq 'Render')
   $microphones = @($physicalDevices | Where-Object Direction -eq 'Capture')
   $cameras = @(Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
@@ -532,10 +532,13 @@ if ($mode -eq 'broadcast') {
     Select-Object -First 1
   $audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
 
-  if ($cable.Default -and $speakers) {
-    $savedSpeakers = if (Test-Path $deviceConfigPath) { (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).speakers } else { '' }
-    $defaultSpeakers = if ($savedSpeakers -in $speakers.'Command-Line Friendly ID') { $savedSpeakers } else { $speakers[0].'Command-Line Friendly ID' }
+  $savedDevices = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  if ($speakers) {
+    $defaultSpeakers = if ($savedDevices.speakers -in $speakers.'Command-Line Friendly ID') { $savedDevices.speakers } else { $speakers[0].'Command-Line Friendly ID' }
     & $svclPath /SetDefault $defaultSpeakers all
+  }
+  if ($microphones -and $savedDevices.microphone -in $microphones.'Command-Line Friendly ID') {
+    & $svclPath /SetDefault $savedDevices.microphone all
   }
 }
 
@@ -619,6 +622,12 @@ function Get-Options {
   $options
 }
 
+function Set-DefaultDevices {
+  if ($mode -ne 'broadcast' -or $speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) { return }
+  & $svclPath /SetDefault $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID' all
+  & $svclPath /SetDefault $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID' all
+}
+
 function Save-Config {
   if ($mode -eq 'casting') {
     try {
@@ -648,8 +657,7 @@ function Save-Config {
       camera     = [string]$cameraList.SelectedItem
       options    = Get-Options
     } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
-    & $svclPath /SetDefault $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID' all
-    & $svclPath /SetDefault $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID' all
+    Set-DefaultDevices
     $true
   }
   catch {
@@ -668,6 +676,8 @@ function Invoke-Apply {
   try {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
       -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+    Start-Sleep -Seconds 3
+    Set-DefaultDevices
     switch ($applyProcess.ExitCode) {
       0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
       3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
