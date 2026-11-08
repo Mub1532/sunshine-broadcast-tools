@@ -4,7 +4,8 @@ $ProgressPreference = 'SilentlyContinue'
 
 $repoName = 'sunshine-broadcast-tools'
 $branch = 'main'
-$zipUrl = "https://github.com/Mub1532/$repoName/archive/refs/heads/$branch.zip"
+$silent = [bool]$sbtSilent
+$commit = [string]$sbtCommit
 $svclUrl = 'https://www.nirsoft.net/utils/svcl-x64.zip'
 $cableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
 $mpvReleaseUrl = 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
@@ -22,14 +23,28 @@ function Get-Download([string]$url, [string]$name) {
   $path
 }
 
+function Get-LatestCommit {
+  try { return (Invoke-RestMethod "https://api.github.com/repos/Mub1532/$repoName/commits/$branch" -TimeoutSec 5 -UseBasicParsing).sha }
+  catch {}
+  try {
+    $feed = Invoke-WebRequest "https://github.com/Mub1532/$repoName/commits/$branch.atom" -TimeoutSec 5 -UseBasicParsing
+    if ($feed.Content -match 'Commit/([0-9a-f]{40})') { return $Matches[1] }
+  }
+  catch {}
+  ''
+}
+
 function Test-CableInstalled {
   [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
 }
 
 try {
   Write-Host "Downloading $repoName..."
-  $repoZip = Get-Download $zipUrl 'repo.zip'
+  if (-not $commit) { $commit = Get-LatestCommit }
+  $zipName = if ($commit) { $commit } else { "refs/heads/$branch" }
+  $repoZip = Get-Download "https://github.com/Mub1532/$repoName/archive/$zipName.zip" 'repo.zip'
   Expand-Archive $repoZip $tempDir -Force
+  $sourceDir = (Get-ChildItem $tempDir -Directory -Filter "$repoName-*" | Select-Object -First 1).FullName
 
   $keptDir = Join-Path $tempDir 'kept'
   foreach ($file in $keepFiles) {
@@ -42,7 +57,8 @@ try {
 
   Write-Host "Installing to $installDir..."
   Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-  Copy-Item (Join-Path $tempDir "$repoName-$branch") $installDir -Recurse
+  New-Item $installDir -ItemType Directory -Force | Out-Null
+  Copy-Item "$sourceDir\*" $installDir -Recurse -Force
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
   $messagesPath = Join-Path $installDir 'messageConfig.json'
@@ -50,7 +66,7 @@ try {
   $messagesText = Get-Content $messagesPath -Raw -Encoding UTF8
   foreach ($oldMessage in $oldDisconnectMessages) { $messagesText = $messagesText.Replace("`"$oldMessage`"", "`"{device} Disconnected. If this was not on purpose, please go to {device} and connect again.`"") }
   [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
-  $defaultMessages = Get-Content (Join-Path $tempDir "$repoName-$branch\messageConfig.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+  $defaultMessages = Get-Content (Join-Path $sourceDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })
   if ($missingMessages) {
@@ -82,6 +98,10 @@ try {
   }
 
   Get-ChildItem $installDir -Recurse -File | Unblock-File
+  if ($commit) {
+    [ordered]@{ branch = $branch; commit = $commit } | ConvertTo-Json | Set-Content (Join-Path $installDir 'version.json') -Encoding UTF8
+  }
+  if ($silent) { return }
 
   if (-not (Test-CableInstalled)) {
     Write-Host 'Downloading VB-CABLE...'
@@ -100,6 +120,7 @@ try {
 }
 catch {
   Write-Host "Install failed: $($_.Exception.Message)" -ForegroundColor Red
+  if ($silent) { exit 1 }
 }
 finally {
   Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue

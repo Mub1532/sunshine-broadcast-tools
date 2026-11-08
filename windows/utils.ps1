@@ -19,6 +19,7 @@ $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
 $overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
 $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
+$versionPath = Join-Path $repoDir 'version.json'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -36,6 +37,80 @@ function Show-Message([string]$message, [string]$icon = 'Information', [string]$
   $owner.Activate()
   try { [System.Windows.Forms.MessageBox]::Show($owner, $message, $scriptConfig.title, $buttons, $icon) }
   finally { $owner.Dispose() }
+}
+
+function Enable-SharpText {
+  Import-CSharp 'SharpText' 'public static class SharpText { [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
+  [SharpText]::SetProcessDPIAware() | Out-Null
+}
+
+function New-ScaledForm {
+  $form = New-Object System.Windows.Forms.Form -Property @{
+    Text                = $scriptConfig.title
+    StartPosition       = 'CenterScreen'
+    FormBorderStyle     = 'FixedDialog'
+    MaximizeBox         = $false
+    MinimizeBox         = $false
+    TopMost             = $true
+    Font                = New-Object System.Drawing.Font('Segoe UI', 10)
+    AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+    AutoScaleMode       = 'Dpi'
+    AutoSize            = $true
+    AutoSizeMode        = 'GrowAndShrink'
+    Padding             = New-Object System.Windows.Forms.Padding(20)
+  }
+  $form
+}
+
+function Show-Progress([string]$text) {
+  $form = New-ScaledForm
+  $form.ControlBox = $false
+  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $text; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(300, 0); TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $form.Show()
+  Show-OnTop $form
+  $form.Refresh()
+  $form
+}
+
+function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
+  $form.Controls[0].Text = $text
+  $form.Refresh()
+}
+
+function Show-Choice([string]$message, [string[]]$choices) {
+  $form = New-ScaledForm
+  $form.ShowInTaskbar = $true
+  $layout = New-Object System.Windows.Forms.FlowLayoutPanel -Property @{ FlowDirection = 'TopDown'; AutoSize = $true; AutoSizeMode = 'GrowAndShrink' }
+  $layout.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $message; AutoSize = $true; MaximumSize = New-Object System.Drawing.Size(440, 0); Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16) }))
+  $buttonRow = New-Object System.Windows.Forms.FlowLayoutPanel -Property @{ AutoSize = $true; AutoSizeMode = 'GrowAndShrink'; Margin = New-Object System.Windows.Forms.Padding(0) }
+  for ($index = 0; $index -lt $choices.Count; $index++) {
+    $button = New-Object System.Windows.Forms.Button -Property @{ Text = $choices[$index]; Tag = $index; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(110, 32) }
+    $button.Add_Click({ $this.FindForm().Tag = $this.Tag; $this.FindForm().Close() })
+    $buttonRow.Controls.Add($button)
+  }
+  $layout.Controls.Add($buttonRow)
+  $form.Controls.Add($layout)
+  $form.Tag = -1
+  $form.Add_Shown({ Show-OnTop $this })
+  [void]$form.ShowDialog()
+  [int]$form.Tag
+}
+
+function Get-InstalledVersion {
+  if (Test-Path $versionPath) { return Get-Content $versionPath -Raw | ConvertFrom-Json }
+  [pscustomobject]@{ branch = 'main'; commit = '' }
+}
+
+function Get-LatestCommit([string]$branch) {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try { return (Invoke-RestMethod "https://api.github.com/repos/Mub1532/sunshine-broadcast-tools/commits/$branch" -TimeoutSec 3 -UseBasicParsing).sha }
+  catch {}
+  try {
+    $feed = Invoke-WebRequest "https://github.com/Mub1532/sunshine-broadcast-tools/commits/$branch.atom" -TimeoutSec 3 -UseBasicParsing
+    if ($feed.Content -match 'Commit/([0-9a-f]{40})') { return $Matches[1] }
+  }
+  catch {}
+  ''
 }
 
 function Get-HiddenCommand([string]$script, [string]$arguments = '') {

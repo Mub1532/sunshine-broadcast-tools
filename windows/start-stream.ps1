@@ -1,6 +1,9 @@
 #  when u click start stream, it starts sunshine, checks the name of it, so it can tell you the name to select in moonlight etc, starts the mic routing and show the ready message.
 
+param([switch]$skipUpdateCheck)
+
 . "$PSScriptRoot\utils.ps1"
+Enable-SharpText
 
 if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
   Show-Message $messageConfig.sunshineMissing 'Error' | Out-Null
@@ -39,23 +42,36 @@ if (Test-Path $sunshineConf) {
 }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
-$progressForm = New-Object System.Windows.Forms.Form -Property @{
-  Text            = $scriptConfig.title
-  ClientSize      = New-Object System.Drawing.Size(340, 90)
-  StartPosition   = 'CenterScreen'
-  FormBorderStyle = 'FixedDialog'
-  ControlBox      = $false
-  TopMost         = $true
+$progressForm = Show-Progress $messageConfig.checkingUpdates
+if (-not $skipUpdateCheck) {
+  $installed = Get-InstalledVersion
+  $latestCommit = Get-LatestCommit $installed.branch
+  if ($latestCommit -and $latestCommit -ne $installed.commit) {
+    $progressForm.Hide()
+    $choice = Show-Choice $messageConfig.updateAvailable @($messageConfig.updateNow, $messageConfig.updateLater, $messageConfig.updateSkip)
+    $progressForm.Show()
+    Show-OnTop $progressForm
+    $updateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'update.ps1')`" -branch $($installed.branch) -commit $latestCommit"
+    if ($choice -eq 0) {
+      Set-ProgressText $progressForm $messageConfig.updating
+      try {
+        $updateProcess = Start-Process powershell $updateArgs -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP -Wait -PassThru
+        if ($updateProcess.ExitCode -eq 0) {
+          $progressForm.Close()
+          Start-Hidden 'start-stream.ps1' '-skipUpdateCheck'
+          exit
+        }
+        Show-Message $messageConfig.updateFailed 'Warning' | Out-Null
+      }
+      catch {}
+    }
+    elseif ($choice -eq 1) {
+      try { Start-Process powershell "$updateArgs -afterStream" -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP }
+      catch {}
+    }
+  }
 }
-$progressForm.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-  Text      = $messageConfig.starting
-  Dock      = 'Fill'
-  TextAlign = 'MiddleCenter'
-  Font      = New-Object System.Drawing.Font('Segoe UI', 11)
-}))
-$progressForm.Show()
-Show-OnTop $progressForm
-$progressForm.Refresh()
+Set-ProgressText $progressForm $messageConfig.starting
 
 & (Join-Path $appDir 'broadcast.ps1') start
 Start-Hidden 'webcam-overlay.ps1'

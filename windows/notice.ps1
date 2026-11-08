@@ -1,6 +1,7 @@
 param([Parameter(Mandatory)][string]$messageKey, [string]$reason)
 
 . "$PSScriptRoot\utils.ps1"
+Enable-SharpText
 
 $noticeLock = New-Object System.Threading.Mutex($false, "Local\SunshineBroadcastNotice-$messageKey")
 if (-not $noticeLock.WaitOne(0)) { exit }

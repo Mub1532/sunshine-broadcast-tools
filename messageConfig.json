@@ -1,4 +1,11 @@
 {
+  "checkingUpdates": "Checking for updates...",
+  "updateAvailable": "An update is available. Do you want to update?",
+  "updateNow": "Update now and start stream",
+  "updateLater": "Update in background (new update applies on next run)",
+  "updateSkip": "Not now",
+  "updating": "Updating...",
+  "updateFailed": "The update didn't work. The stream will start with the current version.",
   "starting": "Starting stream...",
   "ready": "Stream is running.\n\nOn the viewing device, open Moonlight, select \"{host}\" and then \"{app}\".",
   "sunshineMissing": "Sunshine is not installed on this computer.",
