@@ -113,7 +113,7 @@ try {
   }
 
   Write-Host 'Opening Setup...'
-  Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`"" -WindowStyle Hidden
+  Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`""
 }
 catch {
   Write-Host "Install failed: $($_.Exception.Message)" -ForegroundColor Red
