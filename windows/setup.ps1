@@ -64,7 +64,12 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $desktopApp = [pscustomobject][ordered]@{ 'name' = 'Desktop'; 'image-path' = 'desktop.png' }
+  $desktopApp = [pscustomobject][ordered]@{
+    'name'       = 'Desktop'
+    'image-path' = 'desktop.png'
+    'prep-cmd'   = $broadcastApp.'prep-cmd'
+    'detached'   = @(Get-HiddenCommand 'broadcast.ps1' 'guard')
+  }
   $modeApp = if ($mode -eq 'casting') { $desktopApp } else { $broadcastApp }
   $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -notin $scriptConfig.appName, $modeApp.name })
   $apps.apps = $otherApps + $modeApp

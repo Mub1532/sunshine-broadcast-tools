@@ -5,10 +5,12 @@ param(
 
 . "$PSScriptRoot\utils.ps1"
 $deviceConfig = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+$isCasting = $deviceConfig.mode -eq 'casting'
 
 
 # makes the selected speaker back to actual laptop one, and make the Mic on 100 so it can be heard.
 function Restore-Speakers {
+  if ($isCasting) { return }
   & $svclPath /SetDefault $deviceConfig.speakers all
   & $svclPath /Unmute $cableId
   & $svclPath /SetVolume $cableId 100
@@ -32,7 +34,7 @@ function Read-NewLogLines {
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
   Remove-Item $streamActivePath -ErrorAction SilentlyContinue
-  & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
+  if (-not $isCasting) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0 }
   $overlayClose = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($overlayCloseName, [ref]$overlayClose)) { [void]$overlayClose.Set() }
   $stopSignal = $null
@@ -45,8 +47,10 @@ switch ($action) {
   'start' {
     New-Item $streamActivePath -ItemType File -Force | Out-Null
     Set-Content $clientNamePath ([string]$env:SUNSHINE_CLIENT_NAME) -Encoding UTF8
-    & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
-    & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
+    if (-not $isCasting) {
+      & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
+      & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
+    }
   }
   'stop' { Stop-Broadcast }
   'cleanup' { if (Test-Path $streamActivePath) { Stop-Broadcast } }
@@ -176,7 +180,7 @@ public class LidWatcher : NativeWindow {
           break
         }
       }
-      if ([DefaultOutput]::GetName() -match 'CABLE Input|Steam Streaming') {
+      if (-not $isCasting -and [DefaultOutput]::GetName() -match 'CABLE Input|Steam Streaming') {
         Start-Sleep -Milliseconds 500
         Restore-Speakers
       }

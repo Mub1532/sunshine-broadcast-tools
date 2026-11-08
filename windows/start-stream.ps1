@@ -42,7 +42,9 @@ if (Test-Path $sunshineConf) {
   $portLine = Select-String -Path $sunshineConf -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
   if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
-$readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
+$isCasting = (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).mode -eq 'casting'
+$appName = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
+$readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $appName }
 
 $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
 if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -ne 'Valid') {
@@ -80,7 +82,8 @@ if (-not $skipUpdateCheck) {
 Set-ProgressText $progressForm $messageConfig.starting
 
 & (Join-Path $appDir 'broadcast.ps1') start
-Start-Hidden 'webcam-overlay.ps1'
+if ($isCasting) { Start-Hidden 'end-button.ps1' }
+else { Start-Hidden 'webcam-overlay.ps1' }
 
 if (-not (Test-SunshineReady)) {
   Start-Process sc.exe "start $serviceName" -WindowStyle Hidden -Wait
@@ -93,7 +96,7 @@ if (-not (Test-SunshineReady)) {
 }
 
 Start-Hidden 'broadcast.ps1' 'guard -session'
-Wait-Until { Test-OverlayReady } 20 | Out-Null
+if (-not $isCasting) { Wait-Until { Test-OverlayReady } 20 | Out-Null }
 
 $progressForm.Close()
 $startingSignal.Dispose()
