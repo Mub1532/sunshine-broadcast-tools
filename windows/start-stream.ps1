@@ -81,6 +81,10 @@ if (-not $skipUpdateCheck) {
 }
 Set-ProgressText $progressForm $messageConfig.starting
 
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay)\.ps1|broadcast\.ps1"? guard' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 & (Join-Path $appDir 'broadcast.ps1') start
 if ($isCasting) { Start-Hidden 'end-button.ps1' }
 else { Start-Hidden 'webcam-overlay.ps1' }
