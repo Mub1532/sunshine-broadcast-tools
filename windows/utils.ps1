@@ -1,6 +1,20 @@
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# when any of our scripts finishes, its errors go into the same debug log as run-hidden, however it was started
+$debugLogPath = Join-Path $env:LOCALAPPDATA 'Sunshine Broadcast Tools\debug.log'
+$scriptCommand = ((Split-Path $MyInvocation.PSCommandPath -Leaf) + ' ' + (([Environment]::GetCommandLineArgs() | Select-Object -Skip 1 | Where-Object { $_ -notmatch '^-(NoProfile|ExecutionPolicy|File)$|^Bypass$|\.ps1$' }) -join ' ')).Trim()
+$null = Register-EngineEvent PowerShell.Exiting -MessageData @{ log = $debugLogPath; command = $scriptCommand } -Action {
+  try {
+    $errors = @($global:Error | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+    if (-not $errors) { return }
+    New-Item (Split-Path $Event.MessageData.log) -ItemType Directory -Force | Out-Null
+    $lines = $errors | ForEach-Object { "  $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber) of $(Split-Path $_.InvocationInfo.ScriptName -Leaf))" }
+    Add-Content $Event.MessageData.log "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $($Event.MessageData.command): errors (some may be harmless)`r`n$($lines -join "`r`n")"
+  }
+  catch {}
+}
+
 $appDir = $PSScriptRoot
 $svclPath = Join-Path $appDir 'svcl.exe'
 $libmpvPath = Join-Path $appDir 'libmpv-2.dll'
