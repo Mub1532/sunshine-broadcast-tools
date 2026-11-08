@@ -9,7 +9,14 @@ if (-not $isAdmin) {
 
 Add-Type -AssemblyName System.Windows.Forms
 $title = 'Sunshine Broadcast Tools'
-$answer = [System.Windows.Forms.MessageBox]::Show('Undo the last update and go back to the previous version?', $title, 'YesNo', 'Question')
+function Show-OnTopMessage([string]$text, [string]$buttons, [string]$icon) {
+  $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; Opacity = 0; Size = '1,1'; StartPosition = 'CenterScreen' }
+  $owner.Show()
+  $owner.Activate()
+  try { [System.Windows.Forms.MessageBox]::Show($owner, $text, $title, $buttons, $icon) }
+  finally { $owner.Dispose() }
+}
+$answer = Show-OnTopMessage 'Undo the last update and go back to the previous version?' 'YesNo' 'Question'
 if ($answer -ne 'Yes') { exit }
 
 try {
@@ -40,8 +47,8 @@ try {
     if ($service.security) { sc.exe sdset SunshineService $service.security | Out-Null }
   }
 
-  [System.Windows.Forms.MessageBox]::Show('The previous version has been restored.', $title, 'OK', 'Information') | Out-Null
+  Show-OnTopMessage 'The previous version has been restored.' 'OK' 'Information' | Out-Null
 }
 catch {
-  [System.Windows.Forms.MessageBox]::Show("Undo failed: $($_.Exception.Message)", $title, 'OK', 'Error') | Out-Null
+  Show-OnTopMessage "Undo failed: $($_.Exception.Message)" 'OK' 'Error' | Out-Null
 }
