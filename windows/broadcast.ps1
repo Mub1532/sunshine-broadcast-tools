@@ -1,9 +1,11 @@
 param(
-  [Parameter(Mandatory)][ValidateSet('start', 'stop', 'release', 'guard', 'cleanup')][string]$action,
+  [Parameter(Mandatory)][ValidateSet('start', 'stop', 'release', 'guard', 'cleanup', 'selftest')][string]$action,
   [switch]$session
 )
 
 . "$PSScriptRoot\utils.ps1"
+# setup runs this through run-hidden to check it works on this laptop
+if ($action -eq 'selftest') { Set-Content (Join-Path $env:TEMP 'sunshine-broadcast-selftest.txt') 'ok'; exit 0 }
 $deviceConfig = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
 $isCasting = $deviceConfig.mode -eq 'casting'
 

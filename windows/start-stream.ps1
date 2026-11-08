@@ -42,7 +42,8 @@ if (Test-Path $sunshineConf) {
   $portLine = Select-String -Path $sunshineConf -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
   if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
-$isCasting = (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).mode -eq 'casting'
+$savedConfig = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+$isCasting = $savedConfig.mode -eq 'casting'
 $appName = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $appName }
 
@@ -85,7 +86,7 @@ function Test-SetupNeedsRepair {
   if (-not (Test-Path $runnerPath) -or (Get-Item $runnerPath).VersionInfo.FileVersion -ne $runnerVersion) { return $true }
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $modeApp = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
-  if (-not (Test-Path $appsPath) -or -not ((Get-Content $appsPath -Raw | ConvertFrom-Json).apps | Where-Object { $_.name -eq $modeApp -and $_.'prep-cmd'[0].do -eq (Get-StartCommand) })) { return $true }
+  if (-not (Test-Path $appsPath) -or -not ((Get-Content $appsPath -Raw | ConvertFrom-Json).apps | Where-Object { $_.name -eq $modeApp -and $_.'prep-cmd'[0].do -eq (Get-StartCommand) -and [bool]$_.'prep-cmd'[0].elevated -eq ($savedConfig.options.runAsAdmin -ne $false) })) { return $true }
   if (-not $isCasting -and -not (Select-String -Path (Join-Path $sunshineConfigDir 'sunshine.conf') -Pattern '^\s*audio_sink\s*=\s*\S' -Quiet)) { return $true }
   $false
 }

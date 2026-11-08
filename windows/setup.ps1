@@ -46,7 +46,7 @@ function Update-SunshineConf([string]$mode, [string]$audioSink, $options) {
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
+function Update-SunshineApps([string]$mode, [bool]$removeOthers, [bool]$runAsAdmin) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -60,7 +60,7 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
     'prep-cmd'   = @([pscustomobject][ordered]@{
         do       = Get-StartCommand
         undo     = Get-HiddenCommand 'broadcast.ps1' 'release'
-        elevated = $false
+        elevated = $runAsAdmin
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
@@ -140,6 +140,29 @@ static class Runner {
     if ($LASTEXITCODE) { throw "Could not build the hidden runner: $($compilerOutput -join ' ')" }
   }
   finally { Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# runs run-hidden the same way sunshine does and checks our script actually ran
+function Test-Runner {
+  $markerPath = Join-Path $env:TEMP 'sunshine-broadcast-selftest.txt'
+  Remove-Item $markerPath -ErrorAction SilentlyContinue
+  try {
+    $testProcess = Start-Process $runnerPath 'broadcast.ps1 selftest' -PassThru
+    if (-not $testProcess.WaitForExit(30000)) { Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue }
+  }
+  catch { return $false }
+  Test-Path $markerPath
+}
+
+# builds run-hidden, rebuilds once if the test fails, and returns the reason if it still doesnt work
+function Install-WorkingRunner {
+  Install-Runner
+  if (Test-Runner) { return }
+  Install-Runner
+  if (Test-Runner) { return }
+  $logPath = Join-Path $env:LOCALAPPDATA 'Sunshine Broadcast Tools\debug.log'
+  $reason = if (Test-Path $logPath) { (Get-Content $logPath -Tail 6) -join "`n" } else { 'run-hidden.exe did not start at all (maybe blocked by antivirus)' }
+  "run-hidden.exe doesn't work on this laptop, streams will start with the backup method instead.`n$reason"
 }
 
 function Install-SunshineService {
@@ -453,7 +476,11 @@ if ($applyFrom -or $repair) {
       'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
       'Ports'     = { Set-SunshinePorts }
       'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
-      'Apps'      = { Install-Runner; Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) }
+      'Apps'      = {
+        $runnerProblem = Install-WorkingRunner
+        Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) ($request.options.runAsAdmin -ne $false)
+        if ($runnerProblem) { throw $runnerProblem }
+      }
       'Shortcuts' = {
         New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
@@ -676,8 +703,8 @@ else {
 }
 
 $optionBoxes = [ordered]@{}
-foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio') {
-  $checked = [bool]$savedConfig.options.$option
+foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio', 'runAsAdmin') {
+  $checked = if ($option -eq 'runAsAdmin') { $savedConfig.options.runAsAdmin -ne $false } else { [bool]$savedConfig.options.$option }
   $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; AutoSize = $true }) 26
 }
 $script:nextTop += 10

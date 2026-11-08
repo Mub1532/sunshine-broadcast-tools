@@ -16,6 +16,7 @@
   "disableInputOption": "Disable controlling of the PC from Moonlight",
   "vigemDriverOption": "Set gamepad driver to ViGEmBus",
   "disableSteamAudioOption": "Don't install Steam audio drivers (Steam Streaming Speakers)",
+  "runAsAdminOption": "Run stream scripts as admin (fixes some laptops with issues)",
   "applyButton": "Save / Apply to Sunshine",
   "undoButton": "Undo last update",
   "setupMenuText": "What do you want to do?",
