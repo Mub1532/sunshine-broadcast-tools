@@ -11,7 +11,7 @@ using System.Drawing;
 using System.Windows.Forms;
 
 public class EndButtonForm : Form {
-  const int Edge = 8;
+  const int Edge = 5;
   readonly Button button;
   Point dragStart;
   bool dragging;
@@ -84,10 +84,10 @@ public class EndButtonForm : Form {
 $closeSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $overlayCloseName)
 
 $scale = Get-Scale
-$buttonWidth = [int](170 * $scale)
-$buttonHeight = [int](56 * $scale)
+$buttonWidth = [int](120 * $scale)
+$buttonHeight = [int](36 * $scale)
 $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$endForm = New-Object EndButtonForm -ArgumentList $scriptConfig.endButton, ([float]12)
+$endForm = New-Object EndButtonForm -ArgumentList $scriptConfig.endButton, ([float]10)
 $endForm.SetBounds($workArea.Left + [int](16 * $scale), $workArea.Bottom - $buttonHeight - [int](24 * $scale), $buttonWidth, $buttonHeight)
 $endForm.Opacity = 0
 
