@@ -8,7 +8,12 @@ $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
 $scriptConfig = Get-Content (Join-Path $repoDir 'scriptConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$messageConfig = Get-Content (Join-Path $repoDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$messagesPath = Join-Path $repoDir 'messageConfig.json'
+$defaultMessagesPath = Join-Path $repoDir 'messageConfig.default.json'
+if (-not (Test-Path $messagesPath) -and (Test-Path $defaultMessagesPath)) {
+  try { Copy-Item $defaultMessagesPath $messagesPath } catch {}
+}
+$messageConfig = Get-Content $(if (Test-Path $messagesPath) { $messagesPath } else { $defaultMessagesPath }) -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $serviceName = 'SunshineService'
 $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'

@@ -62,6 +62,7 @@ try {
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
   $messagesPath = Join-Path $installDir 'messageConfig.json'
+  Copy-Item (Join-Path $sourceDir 'messageConfig.json') (Join-Path $installDir 'messageConfig.default.json') -Force
   $defaultMessages = Get-Content (Join-Path $sourceDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })
