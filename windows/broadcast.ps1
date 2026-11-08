@@ -47,10 +47,15 @@ switch ($action) {
   'start' {
     New-Item $streamActivePath -ItemType File -Force | Out-Null
     Set-Content $clientNamePath ([string]$env:SUNSHINE_CLIENT_NAME) -Encoding UTF8
+    if (-not $isCasting -and $env:SUNSHINE_CLIENT_HOST_AUDIO -eq 'false') {
+      Start-Hidden 'notice.ps1' '-messageKey hostAudioOff'
+      exit 1
+    }
     if (-not $isCasting) {
       & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
       & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
     }
+
   }
   'stop' { Stop-Broadcast }
   'cleanup' { if (Test-Path $streamActivePath) { Stop-Broadcast } }
