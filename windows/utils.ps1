@@ -26,6 +26,8 @@ $startingName = 'Local\SunshineBroadcastStarting'
 $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
 $versionPath = Join-Path $repoDir 'version.json'
+$launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+$launcherVersion = '2.0.0.0'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -167,6 +169,18 @@ function New-EndTrayIcon([scriptblock]$onEnd) {
     if ($click.Button -eq 'Left') { $sender.GetType().GetMethod('ShowContextMenu', [Reflection.BindingFlags]'Instance, NonPublic').Invoke($sender, $null) }
   })
   $tray
+}
+
+function Test-LauncherReady {
+  (Test-Path $launcherPath) -and (Get-Item $launcherPath).VersionInfo.FileVersion -eq $launcherVersion -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid'
+}
+
+function Start-TrayIcon {
+  if (Test-LauncherReady) {
+    $trayArgs = @('--tray', $scriptConfig.endButton, $messageConfig.endConfirm, $scriptConfig.title) | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }
+    Start-Process $launcherPath ($trayArgs -join ' ')
+  }
+  else { Start-Hidden 'end-button.ps1' }
 }
 
 function Get-InstalledVersion {

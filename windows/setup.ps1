@@ -159,7 +159,7 @@ $sunshineIconPath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
 
 function Install-Launcher {
   $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
-  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid') { return $launcherPath }
+  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid' -and (Get-Item $launcherPath).VersionInfo.FileVersion -eq $launcherVersion) { return $launcherPath }
 
   $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-launcher'
   New-Item $buildDir -ItemType Directory -Force | Out-Null
@@ -168,22 +168,107 @@ function Install-Launcher {
   Write-Utf8File $sourcePath @'
 using System;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Text;
 using System.IO;
 using System.Reflection;
+using System.Windows.Forms;
+using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Sunshine Broadcast Tools")]
 [assembly: AssemblyProduct("Sunshine Broadcast Tools")]
 [assembly: AssemblyCompany("Mubashar Khan")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
 static class Launcher {
+  [STAThread]
   static void Main(string[] args) {
     if (args.Length == 0) return;
+    if (args[0] == "--tray") { RunTray(args); return; }
     string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
     string extra = string.Join(" ", args, 1, args.Length - 1);
+    StartHidden(script, extra);
+  }
+
+  static void StartHidden(string script, string extra) {
     Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
       UseShellExecute = false,
       CreateNoWindow = true
     });
+  }
+
+  static void RunTray(string[] args) {
+    string label = args.Length > 1 ? args[1] : "End Stream";
+    string question = args.Length > 2 ? args[2] : "End the stream?";
+    string title = args.Length > 3 ? args[3] : "Sunshine Broadcast";
+    bool created;
+    var closeSignal = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.ManualReset, @"Local\SunshineBroadcastOverlayClose", out created);
+
+    Application.EnableVisualStyles();
+    var menu = new ContextMenuStrip();
+    var tray = new NotifyIcon { Text = title, Icon = RecordIcon(), ContextMenuStrip = menu, Visible = true };
+    menu.Items.Add(label, null, (sender, e) => {
+      using (var owner = new Form { TopMost = true, ShowInTaskbar = false, Opacity = 0, Size = new Size(1, 1), StartPosition = FormStartPosition.CenterScreen }) {
+        owner.Show();
+        owner.Activate();
+        if (MessageBox.Show(owner, question, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+      }
+      StartHidden(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "end-stream.ps1"), "-fromOverlay");
+      Application.Exit();
+    });
+    tray.MouseUp += (sender, e) => {
+      if (e.Button == MouseButtons.Left) {
+        typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(tray, null);
+      }
+    };
+
+    int ticks = 0;
+    var timer = new System.Windows.Forms.Timer { Interval = 300 };
+    timer.Tick += (sender, e) => {
+      if (closeSignal.WaitOne(0)) { Application.Exit(); return; }
+      if (ticks++ < 40 && Promote()) { tray.Visible = false; tray.Visible = true; }
+    };
+    timer.Start();
+    Application.Run();
+    tray.Visible = false;
+    tray.Dispose();
+  }
+
+  static bool Promote() {
+    bool changed = false;
+    try {
+      using (var root = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings")) {
+        if (root == null) return false;
+        foreach (var name in root.GetSubKeyNames()) {
+          using (var key = root.OpenSubKey(name, true)) {
+            if (key == null) continue;
+            var path = key.GetValue("ExecutablePath") as string;
+            if (path == null || !path.EndsWith(@"\Sunshine Broadcast Tools.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            var promoted = key.GetValue("IsPromoted");
+            if (promoted is int && (int)promoted == 1) continue;
+            key.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
+            changed = true;
+          }
+        }
+      }
+    }
+    catch { }
+    return changed;
+  }
+
+  static Icon RecordIcon() {
+    string font = "Segoe MDL2 Assets";
+    foreach (var family in new InstalledFontCollection().Families) {
+      if (family.Name == "Segoe Fluent Icons") font = family.Name;
+    }
+    var bitmap = new Bitmap(32, 32);
+    using (var graphics = Graphics.FromImage(bitmap))
+    using (var glyph = new Font(font, 20, GraphicsUnit.Pixel))
+    using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) {
+      graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+      graphics.DrawString("", glyph, Brushes.Red, new RectangleF(0, 0, 32, 32), format);
+    }
+    return Icon.FromHandle(bitmap.GetHicon());
   }
 }
 '@
@@ -237,7 +322,7 @@ public static class IconBuilder {
 '@
   [IconBuilder]::Save($sunshineIconPath, $iconPath)
   $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" $sourcePath 2>&1
+  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $sourcePath 2>&1
   if ($LASTEXITCODE) { throw "Could not build the launcher: $($compilerOutput -join ' ')" }
 
   foreach ($store in 'Root', 'TrustedPublisher') {

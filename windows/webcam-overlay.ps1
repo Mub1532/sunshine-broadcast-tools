@@ -413,7 +413,6 @@ $requestEnd = {
   }
 }
 $overlay.Add_EndRequested($requestEnd)
-$trayIcon = New-EndTrayIcon $requestEnd
 
 $endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
 $endButtonTimer.Add_Tick({
@@ -425,5 +424,4 @@ $endButtonTimer.Add_Tick({
 $overlay.Add_Shown({ $endButtonTimer.Start() })
 
 [System.Windows.Forms.Application]::Run($overlay)
-$trayIcon.Dispose()
 [Environment]::Exit(0)

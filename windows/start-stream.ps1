@@ -46,8 +46,7 @@ $isCasting = (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).mode -eq 'c
 $appName = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $appName }
 
-$launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
-if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -ne 'Valid') {
+if ((Test-Path $launcherPath) -and -not (Test-LauncherReady)) {
   try { Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -renewLauncher" -Verb RunAs -WindowStyle Hidden }
   catch {}
 }
@@ -84,10 +83,13 @@ Set-ProgressText $progressForm $messageConfig.starting
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay)\.ps1|broadcast\.ps1"? guard' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -ErrorAction SilentlyContinue |
+  Where-Object CommandLine -match '--tray' |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 & (Join-Path $appDir 'broadcast.ps1') start
-if ($isCasting) { Start-Hidden 'end-button.ps1' }
-else { Start-Hidden 'webcam-overlay.ps1' }
+if (-not $isCasting) { Start-Hidden 'webcam-overlay.ps1' }
+Start-TrayIcon
 
 if (-not (Test-SunshineReady)) {
   Start-Process sc.exe "start $serviceName" -WindowStyle Hidden -Wait
