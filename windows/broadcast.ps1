@@ -162,7 +162,6 @@ public class LidWatcher : NativeWindow {
     while (-not $stopSignal.WaitOne(1000) -and (Get-Service $serviceName).Status -eq 'Running') {
       [System.Windows.Forms.Application]::DoEvents()
       $wasFrozen = ((Get-Date) - $lastTick).TotalSeconds -gt 5
-      $lastTick = Get-Date
       $enteredStandby = [bool](Get-Event -SourceIdentifier 'Standby' -ErrorAction SilentlyContinue)
       if ($lidWatcher.Closed -or $wasFrozen -or $enteredStandby) {
         $lidClosed = $true
@@ -189,6 +188,7 @@ public class LidWatcher : NativeWindow {
         $reason = if ($disconnectLine -match 'Ping Timeout') { 'Ping Timeout' } else { 'CLIENT DISCONNECTED' }
         Start-Hidden 'notice.ps1' "-messageKey disconnected -reason `"$reason`""
       }
+      $lastTick = Get-Date
     }
 
     if ($wentToSleep) {
