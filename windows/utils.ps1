@@ -44,28 +44,29 @@ function Enable-SharpText {
   [SharpText]::SetProcessDPIAware() | Out-Null
 }
 
+function Get-Scale {
+  $graphics = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+  try { $graphics.DpiX / 96 } finally { $graphics.Dispose() }
+}
+
 function New-ScaledForm {
-  $form = New-Object System.Windows.Forms.Form -Property @{
-    Text                = $scriptConfig.title
-    StartPosition       = 'CenterScreen'
-    FormBorderStyle     = 'FixedDialog'
-    MaximizeBox         = $false
-    MinimizeBox         = $false
-    TopMost             = $true
-    Font                = New-Object System.Drawing.Font('Segoe UI', 10)
-    AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
-    AutoScaleMode       = 'Dpi'
-    AutoSize            = $true
-    AutoSizeMode        = 'GrowAndShrink'
-    Padding             = New-Object System.Windows.Forms.Padding(20)
+  New-Object System.Windows.Forms.Form -Property @{
+    Text            = $scriptConfig.title
+    StartPosition   = 'CenterScreen'
+    FormBorderStyle = 'FixedDialog'
+    MaximizeBox     = $false
+    MinimizeBox     = $false
+    TopMost         = $true
+    Font            = New-Object System.Drawing.Font('Segoe UI', 10)
   }
-  $form
 }
 
 function Show-Progress([string]$text) {
+  $scale = Get-Scale
   $form = New-ScaledForm
   $form.ControlBox = $false
-  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(300, 0); TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $form.ClientSize = New-Object System.Drawing.Size([int](340 * $scale), [int](90 * $scale))
+  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Dock = 'Fill'; TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
   $dotTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 400 }
   $dotTimer.Add_Tick({
     $label = $form.Controls[0]
@@ -89,18 +90,33 @@ function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
 }
 
 function Show-Choice([string]$message, [string[]]$choices) {
+  $scale = Get-Scale
+  $pad = [int](20 * $scale)
+  $gap = [int](8 * $scale)
   $form = New-ScaledForm
   $form.ShowInTaskbar = $true
-  $layout = New-Object System.Windows.Forms.FlowLayoutPanel -Property @{ FlowDirection = 'TopDown'; AutoSize = $true; AutoSizeMode = 'GrowAndShrink' }
-  $layout.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $message; AutoSize = $true; MaximumSize = New-Object System.Drawing.Size(440, 0); Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16) }))
-  $buttonRow = New-Object System.Windows.Forms.FlowLayoutPanel -Property @{ AutoSize = $true; AutoSizeMode = 'GrowAndShrink'; Margin = New-Object System.Windows.Forms.Padding(0) }
+
+  $label = New-Object System.Windows.Forms.Label -Property @{ Text = $message; AutoSize = $true; MaximumSize = New-Object System.Drawing.Size([int](440 * $scale), 0) }
+  $form.Controls.Add($label)
+  $label.Location = New-Object System.Drawing.Point($pad, $pad)
+
+  $buttons = @()
   for ($index = 0; $index -lt $choices.Count; $index++) {
-    $button = New-Object System.Windows.Forms.Button -Property @{ Text = $choices[$index]; Tag = $index; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(110, 32) }
+    $button = New-Object System.Windows.Forms.Button -Property @{ Text = $choices[$index]; Tag = $index; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size([int](100 * $scale), [int](32 * $scale)); Padding = New-Object System.Windows.Forms.Padding($gap, 0, $gap, 0) }
     $button.Add_Click({ $this.FindForm().Tag = $this.Tag; $this.FindForm().Close() })
-    $buttonRow.Controls.Add($button)
+    $form.Controls.Add($button)
+    $buttons += $button
   }
-  $layout.Controls.Add($buttonRow)
-  $form.Controls.Add($layout)
+  $rowWidth = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Sum).Sum + $gap * ($buttons.Count - 1)
+  $contentWidth = [Math]::Max($label.Width, $rowWidth)
+  $buttonTop = $label.Bottom + [int](20 * $scale)
+  $left = $pad + $contentWidth - $rowWidth
+  foreach ($button in $buttons) {
+    $button.Location = New-Object System.Drawing.Point($left, $buttonTop)
+    $left += $button.Width + $gap
+  }
+  $form.ClientSize = New-Object System.Drawing.Size(($contentWidth + $pad * 2), ($buttonTop + $buttons[0].Height + $pad))
+  $form.AcceptButton = $buttons[0]
   $form.Tag = -1
   $form.Add_Shown({ Show-OnTop $this })
   [void]$form.ShowDialog()
