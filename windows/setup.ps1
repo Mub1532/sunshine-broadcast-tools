@@ -404,5 +404,7 @@ $setupForm.ClientSize = New-Object System.Drawing.Size($formWidth, $script:nextT
 $setupForm.Add_Shown({
   Show-OnTop $setupForm
   $setupForm.TopMost = $false
+  $setupShown = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
 })
 [void]$setupForm.ShowDialog()

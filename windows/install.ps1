@@ -118,7 +118,10 @@ try {
   }
 
   Write-Host 'Opening Setup...'
+  $setupShown = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', 'Local\SunshineBroadcastSetupShown')
   Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`""
+  [void]$setupShown.WaitOne(60000)
+  $setupShown.Dispose()
 }
 catch {
   Write-Host "Install failed: $($_.Exception.Message)" -ForegroundColor Red
