@@ -23,6 +23,11 @@ try {
   $installDir = Join-Path $env:ProgramData 'sunshine-broadcast-tools'
   $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'
 
+  $endStream = Join-Path $installDir 'windows\end-stream.ps1'
+  if (Test-Path $endStream) {
+    $ending = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$endStream`" -fromOverlay" -WindowStyle Hidden -PassThru
+    if (-not $ending.WaitForExit(30000)) { $ending.Kill() }
+  }
   Stop-Service SunshineService -Force -ErrorAction SilentlyContinue
   Get-Process sunshine -ErrorAction SilentlyContinue | Stop-Process -Force
 
@@ -47,6 +52,8 @@ try {
     if ($service.security) { sc.exe sdset SunshineService $service.security | Out-Null }
   }
 
+  Set-Location $env:TEMP
+  Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue
   Show-OnTopMessage 'The previous version has been restored.' 'OK' 'Information' | Out-Null
 }
 catch {
