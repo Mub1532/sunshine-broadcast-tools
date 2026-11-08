@@ -52,7 +52,10 @@ function Update-SunshineApps([bool]$removeOthers) {
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
   $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -ne $scriptConfig.appName })
-  $apps.apps = $otherApps + $broadcastApp
+  $testCommit = if (Test-Path $versionPath) { ((Get-Content $versionPath -Raw | ConvertFrom-Json).commit).Substring(0, 7) } else { 'unknown' }
+  $otherApps = @($otherApps | Where-Object { $_.name -notlike 'Test Application Undo *' })
+  $testApp = [pscustomobject]@{ name = "Test Application Undo $testCommit" }
+  $apps.apps = $otherApps + $broadcastApp + $testApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
 
