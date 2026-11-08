@@ -20,7 +20,6 @@
 
   "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",
   "mpvMissing": "libmpv-2.dll was not found. The webcam overlay will not open. Run the installer again.",
-  "svclMissing": "svcl.exe was not found in:\n{folder}\n\nDownload svcl from nirsoft.net, place svcl.exe in this folder and run Setup again.",
   "devicesUnreadable": "Could not read audio devices.",
   "selectDevices": "Select speakers and a microphone.",
   "saved": "Settings saved.",
@@ -28,5 +27,11 @@
   "applied": "Sunshine has been configured and the Start & End shortcuts were added to the desktop.",
   "restarted": "Sunshine was restarted to apply the changes.",
   "applyFailed": "Could not configure Sunshine:\n{error}",
-  "adminRequired": "Administrator permission is required to configure Sunshine."
+  "adminRequired": "Administrator permission is required to configure Sunshine.",
+  "componentsNeeded": "Broadcast needs extra components (VB-CABLE, svcl, libmpv). Install them now?",
+  "componentsInstall": "Install",
+  "componentsCancel": "Cancel",
+  "componentsInstalling": "Installing broadcast components...",
+  "componentsFailed": "Could not install the broadcast components.\n\n{error}",
+  "componentsRestart": "VB-CABLE installed. Restart the computer, then open Setup again."
 }

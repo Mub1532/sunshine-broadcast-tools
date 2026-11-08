@@ -323,9 +323,72 @@ do {
   if ($menuChoice -lt 0) { exit }
 } while ($menuChoice -ne 0)
 
-if (-not (Test-Path $svclPath)) {
-  Show-Message (Format-Text $messageConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
-  exit 1
+function Test-CableInstalled {
+  [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
+}
+
+function Get-LibmpvUrl {
+  try {
+    $release = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
+    $url = ($release.assets | Where-Object name -match '^mpv-dev-x86_64-\d{8}-git-.+\.7z$' | Select-Object -First 1).browser_download_url
+    if ($url) { return $url }
+  }
+  catch {}
+  $latestPage = Invoke-WebRequest 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
+  $tag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
+  $assetsPage = Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$tag" -UseBasicParsing
+  if ($assetsPage.Content -match 'href="(/shinchiro/mpv-winbuild-cmake/releases/download/[^"]*/mpv-dev-x86_64-\d{8}-git-[^"/]+\.7z)"') {
+    return "https://github.com$($Matches[1])"
+  }
+  throw 'Could not find the latest libmpv download.'
+}
+
+function Install-BroadcastComponents {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $downloadDir = Join-Path $env:TEMP 'sunshine-broadcast-components'
+  Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item $downloadDir -ItemType Directory | Out-Null
+  try {
+    if (-not (Test-Path $svclPath)) {
+      Invoke-WebRequest 'https://www.nirsoft.net/utils/svcl-x64.zip' -OutFile "$downloadDir\svcl.zip" -UseBasicParsing
+      Expand-Archive "$downloadDir\svcl.zip" "$downloadDir\svcl" -Force
+      Copy-Item "$downloadDir\svcl\svcl.exe" $svclPath
+    }
+    if (-not (Test-Path $libmpvPath)) {
+      Invoke-WebRequest (Get-LibmpvUrl) -OutFile "$downloadDir\mpv.7z" -UseBasicParsing
+      New-Item "$downloadDir\mpv" -ItemType Directory | Out-Null
+      tar.exe -xf "$downloadDir\mpv.7z" -C "$downloadDir\mpv"
+      if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
+      Copy-Item (Get-ChildItem "$downloadDir\mpv" -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
+    }
+    Unblock-File $svclPath, $libmpvPath
+    if (-not (Test-CableInstalled)) {
+      Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$downloadDir\vbcable.zip" -UseBasicParsing
+      Expand-Archive "$downloadDir\vbcable.zip" "$downloadDir\vbcable" -Force
+      Start-Process "$downloadDir\vbcable\VBCABLE_Setup_x64.exe" -WorkingDirectory "$downloadDir\vbcable" -Wait
+      if (Test-CableInstalled) { return 'restart' }
+      throw 'VB-CABLE was not installed.'
+    }
+    'ready'
+  }
+  finally { Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+if (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled)) {
+  if ((Show-Choice $messageConfig.componentsNeeded @($messageConfig.componentsInstall, $messageConfig.componentsCancel)) -ne 0) { exit }
+  $progressForm = Show-Progress $messageConfig.componentsInstalling
+  $progressForm.TopMost = $false
+  try { $componentsResult = Install-BroadcastComponents }
+  catch {
+    $progressForm.Close()
+    Show-Message (Format-Text $messageConfig.componentsFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+    exit 1
+  }
+  $progressForm.Close()
+  if ($componentsResult -eq 'restart') {
+    Show-Message $messageConfig.componentsRestart | Out-Null
+    exit
+  }
 }
 
 $deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
