@@ -111,6 +111,11 @@ try {
   }
 
   Get-ChildItem $installDir -Recurse -File | Unblock-File
+  $setupShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $installDir 'Sunshine Broadcast Setup.lnk'))
+  $setupShortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'
+  $setupShortcut.Arguments = "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`""
+  $setupShortcut.IconLocation = "$env:ProgramFiles\Sunshine\sunshine.exe,0"
+  $setupShortcut.Save()
   if ($commit) {
     [ordered]@{ branch = $branch; commit = $commit } | ConvertTo-Json | Set-Content (Join-Path $installDir 'version.json') -Encoding UTF8
   }
