@@ -12,12 +12,9 @@ $repoName = 'sunshine-broadcast-tools'
 $branch = 'main'
 $silent = [bool]$sbtSilent
 $commit = [string]$sbtCommit
-$svclUrl = 'https://www.nirsoft.net/utils/svcl-x64.zip'
-$cableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
-$mpvReleaseUrl = 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
 $installDir = Join-Path $env:ProgramData $repoName
 $windowsDir = Join-Path $installDir 'windows'
-$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe'
+$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe', 'windows\run-hidden.exe', 'broadcast-config-backup', 'casting-config-backup'
 
 $tempDir = Join-Path $env:TEMP "$repoName-install"
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -38,10 +35,6 @@ function Get-LatestCommit {
   }
   catch {}
   ''
-}
-
-function Test-CableInstalled {
-  [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
 }
 
 try {
@@ -96,10 +89,15 @@ try {
     if (-not (Test-Path $existing)) { continue }
     $backup = Join-Path $keptDir $file
     New-Item (Split-Path $backup) -ItemType Directory -Force | Out-Null
-    Copy-Item $existing $backup
+    Copy-Item $existing $backup -Recurse
   }
 
   Write-Host "Installing to $installDir..."
+  $endStream = Join-Path $windowsDir 'end-stream.ps1'
+  if (Test-Path $endStream) {
+    Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$endStream`" -fromOverlay" -WindowStyle Hidden -Wait
+    Start-Sleep -Seconds 2
+  }
   Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
   New-Item $installDir -ItemType Directory -Force | Out-Null
   Copy-Item "$sourceDir\*" $installDir -Recurse -Force
@@ -117,40 +115,12 @@ try {
     [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
   }
 
-  $svclPath = Join-Path $windowsDir 'svcl.exe'
-  if (-not (Test-Path $svclPath)) {
-    Write-Host 'Downloading svcl...'
-    $svclDir = Join-Path $tempDir 'svcl'
-    Expand-Archive (Get-Download $svclUrl 'svcl.zip') $svclDir -Force
-    Copy-Item (Join-Path $svclDir 'svcl.exe') $svclPath
-  }
-
-  $libmpvPath = Join-Path $windowsDir 'libmpv-2.dll'
-  if (-not (Test-Path $libmpvPath)) {
-    Write-Host 'Downloading libmpv...'
-    $mpvUrl = $null
-    try {
-      $release = Invoke-RestMethod $mpvReleaseUrl -UseBasicParsing
-      $mpvUrl = ($release.assets | Where-Object name -match '^mpv-dev-x86_64-\d{8}-git-.+\.7z$' | Select-Object -First 1).browser_download_url
-    }
-    catch {}
-    if (-not $mpvUrl) {
-      $latestPage = Invoke-WebRequest 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
-      $mpvTag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
-      $assetsPage = Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$mpvTag" -UseBasicParsing
-      if ($assetsPage.Content -match 'href="(/shinchiro/mpv-winbuild-cmake/releases/download/[^"]*/mpv-dev-x86_64-\d{8}-git-[^"/]+\.7z)"') {
-        $mpvUrl = "https://github.com$($Matches[1])"
-      }
-    }
-    if (-not $mpvUrl) { throw 'Could not find the latest libmpv download.' }
-    $mpvDir = Join-Path $tempDir 'mpv'
-    New-Item $mpvDir -ItemType Directory | Out-Null
-    tar.exe -xf (Get-Download $mpvUrl 'mpv.7z') -C $mpvDir
-    if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
-    Copy-Item (Get-ChildItem $mpvDir -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
-  }
-
   Get-ChildItem $installDir -Recurse -File | Unblock-File
+  $setupShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $installDir 'Sunshine Broadcast Setup.lnk'))
+  $setupShortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'
+  $setupShortcut.Arguments = "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`""
+  $setupShortcut.IconLocation = "$env:ProgramFiles\Sunshine\sunshine.exe,0"
+  $setupShortcut.Save()
   if ($commit) {
     [ordered]@{ branch = $branch; commit = $commit } | ConvertTo-Json | Set-Content (Join-Path $installDir 'version.json') -Encoding UTF8
   }
@@ -165,18 +135,6 @@ try {
     Write-Host 'Opening the Sunshine installer...'
     $sunshineSetup = Start-Process msiexec.exe "/i `"$sunshineInstaller`"" -Wait -PassThru
     if ($sunshineSetup.ExitCode -notin 0, 3010) { throw "Sunshine install failed (code $($sunshineSetup.ExitCode))." }
-  }
-
-  if (-not (Test-CableInstalled)) {
-    Write-Host 'Downloading VB-CABLE...'
-    $cableDir = Join-Path $tempDir 'vbcable'
-    Expand-Archive (Get-Download $cableUrl 'vbcable.zip') $cableDir -Force
-    Start-Process (Join-Path $cableDir 'VBCABLE_Setup_x64.exe') -WorkingDirectory $cableDir -Wait
-    if (Test-CableInstalled) {
-      Write-Host 'VB-CABLE installed. Restart the computer, then run Setup from:' -ForegroundColor Yellow
-      Write-Host "  $windowsDir\setup.ps1" -ForegroundColor Yellow
-      return
-    }
   }
 
   Write-Host 'Opening Setup...'

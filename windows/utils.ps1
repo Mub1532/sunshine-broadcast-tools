@@ -26,6 +26,9 @@ $startingName = 'Local\SunshineBroadcastStarting'
 $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
 $versionPath = Join-Path $repoDir 'version.json'
+$launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+$launcherVersion = '2.0.1.0'
+$runnerPath = Join-Path $appDir 'run-hidden.exe'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -139,6 +142,44 @@ function Show-Choice([string]$message, [string[]]$choices) {
   $form.Add_Shown({ Show-OnTop $this })
   [void]$form.ShowDialog()
   [int]$form.Tag
+}
+
+function New-RecordIcon {
+  $bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.SmoothingMode = 'AntiAlias'
+  $graphics.FillEllipse([System.Drawing.Brushes]::White, 3, 3, 26, 26)
+  $graphics.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 40, 40))), 6, 6, 20, 20)
+  $graphics.Dispose()
+  [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
+}
+
+function New-EndTrayIcon([scriptblock]$onEnd) {
+  $menu = New-Object System.Windows.Forms.ContextMenuStrip
+  $menu.Items.Add($scriptConfig.endButton).Add_Click($onEnd) | Out-Null
+  $tray = New-Object System.Windows.Forms.NotifyIcon -Property @{
+    Text             = $scriptConfig.title
+    Icon             = New-RecordIcon
+    ContextMenuStrip = $menu
+    Visible          = $true
+  }
+  $tray.Add_MouseUp({
+    param($sender, $click)
+    if ($click.Button -eq 'Left') { $sender.GetType().GetMethod('ShowContextMenu', [Reflection.BindingFlags]'Instance, NonPublic').Invoke($sender, $null) }
+  })
+  $tray
+}
+
+function Test-LauncherReady {
+  (Test-Path $launcherPath) -and (Get-Item $launcherPath).VersionInfo.FileVersion -eq $launcherVersion -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid'
+}
+
+function Start-TrayIcon {
+  if (Test-LauncherReady) {
+    $trayArgs = @('--tray', $scriptConfig.endButton, $messageConfig.endConfirm, $scriptConfig.title) | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }
+    Start-Process $launcherPath ($trayArgs -join ' ')
+  }
+  else { Start-Hidden 'end-button.ps1' }
 }
 
 function Get-InstalledVersion {

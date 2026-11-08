@@ -84,7 +84,7 @@ WIP
 
 ## Usage
 
-**Presenter:** double-click **Start Sunshine Stream** → wait for the message → present → click **End Stream** on the webcam overlay (broadcast) or the floating **End Stream** button (casting).
+**Presenter:** double-click **Start Sunshine Stream** → wait for the message → present → click **End Stream** on the webcam overlay (broadcast), or click the red record icon in the system tray → **End Stream** (both modes).
 
 **Viewer:** open Moonlight → select the host → **Desktop Broadcast**.
 

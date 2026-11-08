@@ -320,6 +320,14 @@ public class OverlayForm : Form {
     if (player == IntPtr.Zero || !cameraOn) base.OnPaintBackground(args);
   }
 
+  protected override void OnLocationChanged(EventArgs args) {
+    base.OnLocationChanged(args);
+    var area = Screen.FromControl(this).WorkingArea;
+    int x = Math.Max(area.Left, Math.Min(Left, area.Right - Width));
+    int y = Math.Max(area.Top, Math.Min(Top, area.Bottom - Height));
+    if (x != Left || y != Top) Location = new Point(x, y);
+  }
+
   protected override void OnResize(EventArgs args) {
     base.OnResize(args);
     if (endButton != null) PlaceButtons();
@@ -398,12 +406,13 @@ $overlay.MicrophoneToggled = [Action[bool]]{
   param($microphoneOn)
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
 }
-$overlay.Add_EndRequested({
+$requestEnd = {
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
     Start-Hidden 'end-stream.ps1' '-fromOverlay'
     $overlay.Close()
   }
-})
+}
+$overlay.Add_EndRequested($requestEnd)
 
 $endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
 $endButtonTimer.Add_Tick({

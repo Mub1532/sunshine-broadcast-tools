@@ -1,4 +1,4 @@
-param([string]$applyFrom, [switch]$renewLauncher)
+param([string]$applyFrom, [switch]$renewLauncher, [switch]$repair)
 
 . "$PSScriptRoot\utils.ps1"
 
@@ -17,7 +17,7 @@ function Write-Utf8File([string]$path, [string]$content) {
   [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Update-SunshineConf([string]$audioSink, $options) {
+function Update-SunshineConf([string]$mode, [string]$audioSink, $options) {
   $wanted = [ordered]@{}
   if ($options.disableInput) { $wanted.keyboard = 'disabled'; $wanted.mouse = 'disabled'; $wanted.controller = 'disabled' }
   if ($options.vigemDriver) { $wanted.gamepad_driver = 'vigembus' }
@@ -37,14 +37,16 @@ function Update-SunshineConf([string]$audioSink, $options) {
       $keptLines += $line
     }
   }
-  $keptLines += "audio_sink = $audioSink"
-  $keptLines += "virtual_sink = $audioSink"
-  $keptLines += "external_audio = enabled"
+  if ($mode -eq 'broadcast') {
+    $keptLines += "audio_sink = $audioSink"
+    $keptLines += "virtual_sink = $audioSink"
+    $keptLines += "external_audio = enabled"
+  }
   foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps([bool]$removeOthers) {
+function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -56,15 +58,56 @@ function Update-SunshineApps([bool]$removeOthers) {
     'name'       = $scriptConfig.appName
     'image-path' = Join-Path $repoDir 'images\desktop-broadcast.png'
     'prep-cmd'   = @([pscustomobject][ordered]@{
-        do       = Get-HiddenCommand 'broadcast.ps1' 'start'
+        do       = "`"$runnerPath`" broadcast.ps1 start"
         undo     = Get-HiddenCommand 'broadcast.ps1' 'release'
         elevated = $false
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -ne $scriptConfig.appName })
-  $apps.apps = $otherApps + $broadcastApp
+  $desktopApp = [pscustomobject][ordered]@{
+    'name'       = 'Desktop'
+    'image-path' = 'desktop.png'
+    'prep-cmd'   = $broadcastApp.'prep-cmd'
+    'detached'   = @(Get-HiddenCommand 'broadcast.ps1' 'guard')
+  }
+  $modeApp = if ($mode -eq 'casting') { $desktopApp } else { $broadcastApp }
+  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -notin $scriptConfig.appName, $modeApp.name })
+  $otherApps = @($otherApps | ForEach-Object {
+      if ($_.name -eq 'Desktop') { [pscustomobject][ordered]@{ 'name' = 'Desktop'; 'image-path' = 'desktop.png' } } else { $_ }
+    })
+  $apps.apps = $otherApps + $modeApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
+}
+
+function Install-Runner {
+  $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-runner'
+  New-Item $buildDir -ItemType Directory -Force | Out-Null
+  $sourcePath = Join-Path $buildDir 'runner.cs'
+  Write-Utf8File $sourcePath @'
+using System;
+using System.Diagnostics;
+using System.IO;
+
+static class Runner {
+  static int Main(string[] args) {
+    if (args.Length == 0) return 1;
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
+    string extra = string.Join(" ", args, 1, args.Length - 1);
+    var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
+      UseShellExecute = false,
+      CreateNoWindow = true
+    });
+    process.WaitForExit();
+    return process.ExitCode;
+  }
+}
+'@
+  $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  try {
+    $compilerOutput = & $compiler /nologo /target:winexe "/out:$runnerPath" $sourcePath 2>&1
+    if ($LASTEXITCODE) { throw "Could not build the hidden runner: $($compilerOutput -join ' ')" }
+  }
+  finally { Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Install-SunshineService {
@@ -147,7 +190,7 @@ $sunshineIconPath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
 
 function Install-Launcher {
   $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
-  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid') { return $launcherPath }
+  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid' -and (Get-Item $launcherPath).VersionInfo.FileVersion -eq $launcherVersion) { return $launcherPath }
 
   $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-launcher'
   New-Item $buildDir -ItemType Directory -Force | Out-Null
@@ -156,22 +199,101 @@ function Install-Launcher {
   Write-Utf8File $sourcePath @'
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Windows.Forms;
+using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Sunshine Broadcast Tools")]
 [assembly: AssemblyProduct("Sunshine Broadcast Tools")]
 [assembly: AssemblyCompany("Mubashar Khan")]
+[assembly: AssemblyFileVersion("2.0.1.0")]
 
 static class Launcher {
+  [STAThread]
   static void Main(string[] args) {
     if (args.Length == 0) return;
+    if (args[0] == "--tray") { RunTray(args); return; }
     string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
     string extra = string.Join(" ", args, 1, args.Length - 1);
+    StartHidden(script, extra);
+  }
+
+  static void StartHidden(string script, string extra) {
     Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
       UseShellExecute = false,
       CreateNoWindow = true
     });
+  }
+
+  static void RunTray(string[] args) {
+    string label = args.Length > 1 ? args[1] : "End Stream";
+    string question = args.Length > 2 ? args[2] : "End the stream?";
+    string title = args.Length > 3 ? args[3] : "Sunshine Broadcast";
+    bool created;
+    var closeSignal = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.ManualReset, @"Local\SunshineBroadcastOverlayClose", out created);
+
+    Application.EnableVisualStyles();
+    var menu = new ContextMenuStrip();
+    var tray = new NotifyIcon { Text = title, Icon = RecordIcon(), ContextMenuStrip = menu, Visible = true };
+    menu.Items.Add(label, null, (sender, e) => {
+      using (var owner = new Form { TopMost = true, ShowInTaskbar = false, Opacity = 0, Size = new Size(1, 1), StartPosition = FormStartPosition.CenterScreen }) {
+        owner.Show();
+        owner.Activate();
+        if (MessageBox.Show(owner, question, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+      }
+      StartHidden(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "end-stream.ps1"), "-fromOverlay");
+      Application.Exit();
+    });
+    tray.MouseUp += (sender, e) => {
+      if (e.Button == MouseButtons.Left) {
+        typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(tray, null);
+      }
+    };
+
+    int ticks = 0;
+    var timer = new System.Windows.Forms.Timer { Interval = 300 };
+    timer.Tick += (sender, e) => {
+      if (closeSignal.WaitOne(0)) { Application.Exit(); return; }
+      if (ticks++ < 40 && Promote()) { tray.Visible = false; tray.Visible = true; }
+    };
+    timer.Start();
+    Application.Run();
+    tray.Visible = false;
+    tray.Dispose();
+  }
+
+  static bool Promote() {
+    bool changed = false;
+    try {
+      using (var root = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings")) {
+        if (root == null) return false;
+        foreach (var name in root.GetSubKeyNames()) {
+          using (var key = root.OpenSubKey(name, true)) {
+            if (key == null) continue;
+            var path = key.GetValue("ExecutablePath") as string;
+            if (path == null || !path.EndsWith(@"\Sunshine Broadcast Tools.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            var promoted = key.GetValue("IsPromoted");
+            if (promoted is int && (int)promoted == 1) continue;
+            key.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
+            changed = true;
+          }
+        }
+      }
+    }
+    catch { }
+    return changed;
+  }
+
+  static Icon RecordIcon() {
+    var bitmap = new Bitmap(32, 32);
+    using (var graphics = Graphics.FromImage(bitmap)) {
+      graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+      graphics.FillEllipse(Brushes.White, 3, 3, 26, 26);
+      using (var red = new SolidBrush(Color.FromArgb(220, 40, 40))) graphics.FillEllipse(red, 6, 6, 20, 20);
+    }
+    return Icon.FromHandle(bitmap.GetHicon());
   }
 }
 '@
@@ -225,7 +347,7 @@ public static class IconBuilder {
 '@
   [IconBuilder]::Save($sunshineIconPath, $iconPath)
   $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" $sourcePath 2>&1
+  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $sourcePath 2>&1
   if ($LASTEXITCODE) { throw "Could not build the launcher: $($compilerOutput -join ' ')" }
 
   foreach ($store in 'Root', 'TrustedPublisher') {
@@ -274,17 +396,32 @@ if ($renewLauncher) {
   try { Install-Launcher | Out-Null; exit 0 } catch { exit 1 }
 }
 
-if ($applyFrom) {
+function New-RepairRequest {
+  $saved = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+  $repairMode = if ($saved.mode -eq 'casting') { 'casting' } else { 'broadcast' }
+  $sink = ''
+  if ($repairMode -eq 'broadcast') {
+    $csvPath = Join-Path $env:TEMP 'sunshine-broadcast-repair.csv'
+    Start-Process $svclPath "/scomma `"$csvPath`" /Columns `"Name,Type,Direction,Device Name`"" -Wait -WindowStyle Hidden
+    $cableDevice = Import-Csv $csvPath -ErrorAction SilentlyContinue |
+      Where-Object { $_.Type -eq 'Device' -and $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } | Select-Object -First 1
+    Remove-Item $csvPath -ErrorAction SilentlyContinue
+    if ($cableDevice) { $sink = "$($cableDevice.Name) ($($cableDevice.'Device Name'))" }
+  }
+  [pscustomobject]@{ mode = $repairMode; audioSink = $sink; options = $saved.options }
+}
+
+if ($applyFrom -or $repair) {
   try {
-    $request = Get-Content $applyFrom -Raw | ConvertFrom-Json
+    $request = if ($repair) { New-RepairRequest } else { Get-Content $applyFrom -Raw | ConvertFrom-Json }
     $failures = @()
     $steps = [ordered]@{
       'Service'   = { Install-SunshineService; Grant-ServiceControl }
       'Firewall'  = { Add-FirewallRules }
       'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
       'Ports'     = { Set-SunshinePorts }
-      'Config'    = { Update-SunshineConf $request.audioSink $request.options }
-      'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
+      'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
+      'Apps'      = { Install-Runner; Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
         New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
@@ -296,6 +433,7 @@ if ($applyFrom) {
       catch { $failures += "$($step.Key): $($_.Exception.Message)" }
     }
     if ($failures) { throw ($failures -join "`n") }
+    if ($repair) { exit 0 }
 
     if ((Get-Service $serviceName).Status -eq 'Running') {
       Restart-Service $serviceName -Force
@@ -304,7 +442,7 @@ if ($applyFrom) {
     exit 0
   }
   catch {
-    Set-Content "$applyFrom.err" $_.Exception.Message
+    if ($applyFrom) { Set-Content "$applyFrom.err" $_.Exception.Message }
     exit 1
   }
 }
@@ -314,38 +452,136 @@ if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcast
 $restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
 $menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
 if (Test-Path $restoreScript) { $menuChoices += $scriptConfig.undoButton }
-do {
-  $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
-  if ($menuChoice -eq 2) {
-    Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+$menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
+if ($menuChoice -eq 2) {
+  Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+  exit
+}
+if ($menuChoice -lt 0) { exit }
+$mode = if ($menuChoice -eq 1) { 'casting' } else { 'broadcast' }
+
+function Switch-ModeConfig([string]$fromMode, [string]$toMode) {
+  $modeFiles = @{ 'sunshine.conf' = $sunshineConfigDir; 'apps.json' = $sunshineConfigDir; 'deviceConfig.json' = $appDir }
+  $fromDir = Join-Path $repoDir "$fromMode-config-backup"
+  New-Item $fromDir -ItemType Directory -Force | Out-Null
+  foreach ($file in $modeFiles.GetEnumerator()) {
+    $source = Join-Path $file.Value $file.Key
+    if (Test-Path $source) { Copy-Item $source $fromDir -Force }
+  }
+  $toDir = Join-Path $repoDir "$toMode-config-backup"
+  if (Test-Path $toDir) {
+    foreach ($file in $modeFiles.GetEnumerator()) {
+      $saved = Join-Path $toDir $file.Key
+      if (Test-Path $saved) { Copy-Item $saved $file.Value -Force }
+    }
+  }
+}
+
+$previousConfig = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { $null }
+$previousMode = if ($previousConfig.mode) { $previousConfig.mode } elseif ($previousConfig.speakers) { 'broadcast' } else { '' }
+if ($previousMode -and $previousMode -ne $mode) {
+  try { Switch-ModeConfig $previousMode $mode }
+  catch { Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null; exit 1 }
+}
+
+function Test-CableInstalled {
+  [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
+}
+
+function Get-LibmpvUrl {
+  try {
+    $release = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
+    $url = ($release.assets | Where-Object name -match '^mpv-dev-x86_64-\d{8}-git-.+\.7z$' | Select-Object -First 1).browser_download_url
+    if ($url) { return $url }
+  }
+  catch {}
+  $latestPage = Invoke-WebRequest 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
+  $tag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
+  $assetsPage = Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$tag" -UseBasicParsing
+  if ($assetsPage.Content -match 'href="(/shinchiro/mpv-winbuild-cmake/releases/download/[^"]*/mpv-dev-x86_64-\d{8}-git-[^"/]+\.7z)"') {
+    return "https://github.com$($Matches[1])"
+  }
+  throw 'Could not find the latest libmpv download.'
+}
+
+function Install-BroadcastComponents {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $downloadDir = Join-Path $env:TEMP 'sunshine-broadcast-components'
+  Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item $downloadDir -ItemType Directory | Out-Null
+  try {
+    if (-not (Test-Path $svclPath)) {
+      Invoke-WebRequest 'https://www.nirsoft.net/utils/svcl-x64.zip' -OutFile "$downloadDir\svcl.zip" -UseBasicParsing
+      Expand-Archive "$downloadDir\svcl.zip" "$downloadDir\svcl" -Force
+      Copy-Item "$downloadDir\svcl\svcl.exe" $svclPath
+    }
+    if (-not (Test-Path $libmpvPath)) {
+      Invoke-WebRequest (Get-LibmpvUrl) -OutFile "$downloadDir\mpv.7z" -UseBasicParsing
+      New-Item "$downloadDir\mpv" -ItemType Directory | Out-Null
+      tar.exe -xf "$downloadDir\mpv.7z" -C "$downloadDir\mpv"
+      if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
+      Copy-Item (Get-ChildItem "$downloadDir\mpv" -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
+    }
+    Unblock-File $svclPath, $libmpvPath
+    if (-not (Test-CableInstalled)) {
+      Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$downloadDir\vbcable.zip" -UseBasicParsing
+      Expand-Archive "$downloadDir\vbcable.zip" "$downloadDir\vbcable" -Force
+      Start-Process "$downloadDir\vbcable\VBCABLE_Setup_x64.exe" -WorkingDirectory "$downloadDir\vbcable" -Wait
+      if (Test-CableInstalled) { return 'restart' }
+      throw 'VB-CABLE was not installed.'
+    }
+    'ready'
+  }
+  finally { Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled))) {
+  if ((Show-Choice $messageConfig.componentsNeeded @($messageConfig.componentsInstall, $messageConfig.componentsCancel)) -ne 0) { exit }
+  $progressForm = Show-Progress $messageConfig.componentsInstalling
+  $progressForm.TopMost = $false
+  try { $componentsResult = Install-BroadcastComponents }
+  catch {
+    $progressForm.Close()
+    Show-Message (Format-Text $messageConfig.componentsFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+    exit 1
+  }
+  $progressForm.Close()
+  if ($componentsResult -eq 'restart') {
+    Show-Message $messageConfig.componentsRestart | Out-Null
     exit
   }
-  if ($menuChoice -lt 0) { exit }
-} while ($menuChoice -ne 0)
-
-if (-not (Test-Path $svclPath)) {
-  Show-Message (Format-Text $messageConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
-  exit 1
 }
 
-$deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
-Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
-$audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
-Remove-Item $deviceCsv -ErrorAction SilentlyContinue
-if (-not $audioDevices) {
-  Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
-  exit 1
+$audioSink = ''
+if ($mode -eq 'broadcast') {
+  $deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
+  Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Default,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
+  $audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
+  Remove-Item $deviceCsv -ErrorAction SilentlyContinue
+  if (-not $audioDevices) {
+    Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
+    exit 1
+  }
+
+  $physicalDevices = $audioDevices | Where-Object { "$($_.Name) $($_.'Device Name')" -notmatch 'VB-Audio|Steam Streaming' }
+  $speakers = @($physicalDevices | Where-Object Direction -eq 'Render')
+  $microphones = @($physicalDevices | Where-Object Direction -eq 'Capture')
+  $cameras = @(Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
+    Where-Object Class -in 'Camera', 'Image' | Select-Object -ExpandProperty FriendlyName)
+
+  $cable = $audioDevices | Where-Object { $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } |
+    Select-Object -First 1
+  $audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
+
+  $savedDevices = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  if ($speakers) {
+    $defaultSpeakers = if ($savedDevices.speakers -in $speakers.'Command-Line Friendly ID') { $savedDevices.speakers } else { $speakers[0].'Command-Line Friendly ID' }
+    & $svclPath /SetDefault $defaultSpeakers all
+  }
+  if ($microphones -and $savedDevices.microphone -in $microphones.'Command-Line Friendly ID') {
+    & $svclPath /SetDefault $savedDevices.microphone all
+  }
 }
-
-$physicalDevices = $audioDevices | Where-Object { $_.'Device Name' -notmatch 'VB-Audio' }
-$speakers = @($physicalDevices | Where-Object Direction -eq 'Render')
-$microphones = @($physicalDevices | Where-Object Direction -eq 'Capture')
-$cameras = @(Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
-  Where-Object Class -in 'Camera', 'Image' | Select-Object -ExpandProperty FriendlyName)
-
-$cable = $audioDevices | Where-Object { $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } |
-  Select-Object -First 1
-$audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
 
 $savedConfig = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
 $setupPath = $PSCommandPath
@@ -358,7 +594,7 @@ function Get-SavedIndex($devices, [string]$savedId) {
 }
 
 $setupForm = New-Object System.Windows.Forms.Form -Property @{
-  Text            = $scriptConfig.setupTitle
+  Text            = if ($mode -eq 'casting') { $scriptConfig.castingSetupTitle } else { $scriptConfig.setupTitle }
   StartPosition   = 'CenterScreen'
   FormBorderStyle = 'FixedDialog'
   MaximizeBox     = $false
@@ -389,18 +625,23 @@ function Add-DropDown([string[]]$items, [int]$selectedIndex) {
 
 function Get-DeviceLabel($device) { "$($device.Name) ($($device.'Device Name'))" }
 
-Add-Label $scriptConfig.speakersLabel
-$speakerList = Add-DropDown ($speakers | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $speakers $savedConfig.speakers)
-Add-Label $scriptConfig.microphoneLabel
-$microphoneList = Add-DropDown ($microphones | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $microphones $savedConfig.microphone)
-Add-Label $scriptConfig.cameraLabel
-$cameraList = Add-DropDown $cameras ([Math]::Max(0, [Array]::IndexOf($cameras, [string]$savedConfig.camera)))
+if ($mode -eq 'casting') {
+  Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $scriptConfig.castingDescription; Height = 40 }) 48 | Out-Null
+}
+else {
+  Add-Label $scriptConfig.speakersLabel
+  $speakerList = Add-DropDown ($speakers | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $speakers $savedConfig.speakers)
+  Add-Label $scriptConfig.microphoneLabel
+  $microphoneList = Add-DropDown ($microphones | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $microphones $savedConfig.microphone)
+  Add-Label $scriptConfig.cameraLabel
+  $cameraList = Add-DropDown $cameras ([Math]::Max(0, [Array]::IndexOf($cameras, [string]$savedConfig.camera)))
 
-Add-Label $scriptConfig.audioSinkLabel
-Add-Row (New-Object System.Windows.Forms.TextBox -Property @{ Text = $audioSink; ReadOnly = $true }) 0 20 370 | Out-Null
-$copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.copyButton }) 44 400 80
-$copyButton.Enabled = [bool]$audioSink
-$copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
+  Add-Label $scriptConfig.audioSinkLabel
+  Add-Row (New-Object System.Windows.Forms.TextBox -Property @{ Text = $audioSink; ReadOnly = $true }) 0 20 370 | Out-Null
+  $copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.copyButton }) 44 400 80
+  $copyButton.Enabled = [bool]$audioSink
+  $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
+}
 
 $optionBoxes = [ordered]@{}
 foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio') {
@@ -410,8 +651,8 @@ foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDri
 $script:nextTop += 10
 
 $warnings = @()
-if (-not $cable) { $warnings += $messageConfig.cableMissing }
-if (-not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
+if ($mode -eq 'broadcast' -and -not $cable) { $warnings += $messageConfig.cableMissing }
+if ($mode -eq 'broadcast' -and -not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
 }
@@ -422,18 +663,42 @@ function Get-Options {
   $options
 }
 
+function Set-DefaultDevices {
+  if ($mode -ne 'broadcast' -or $speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) { return }
+  & $svclPath /SetDefault $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID' all
+  & $svclPath /SetDefault $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID' all
+}
+
 function Save-Config {
+  if ($mode -eq 'casting') {
+    try {
+      [ordered]@{
+        mode       = 'casting'
+        speakers   = $savedConfig.speakers
+        microphone = $savedConfig.microphone
+        camera     = $savedConfig.camera
+        options    = Get-Options
+      } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
+      return $true
+    }
+    catch {
+      Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+      return $false
+    }
+  }
   if ($speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) {
     Show-Message $messageConfig.selectDevices 'Warning' | Out-Null
     return $false
   }
   try {
     [ordered]@{
+      mode       = 'broadcast'
       speakers   = $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID'
       microphone = $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID'
       camera     = [string]$cameraList.SelectedItem
       options    = Get-Options
     } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
+    Set-DefaultDevices
     $true
   }
   catch {
@@ -447,11 +712,13 @@ function Invoke-Apply {
   $requestPath = Join-Path $env:TEMP 'sunshine-broadcast-apply.json'
   $errorPath = "$requestPath.err"
   Remove-Item $errorPath -ErrorAction SilentlyContinue
-  @{ audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
+  @{ mode = $mode; audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
 
   try {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
       -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+    Start-Sleep -Seconds 3
+    Set-DefaultDevices
     switch ($applyProcess.ExitCode) {
       0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
       3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
@@ -469,7 +736,7 @@ function Invoke-Apply {
 
 $applyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.applyButton; Height = 34 }) 50 300 180
 $applyButton.Add_Click({
-  if ($audioSink) { Invoke-Apply }
+  if ($mode -eq 'casting' -or $audioSink) { Invoke-Apply }
   elseif (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
 })
 
