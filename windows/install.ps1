@@ -1,4 +1,9 @@
 $ErrorActionPreference = 'Stop'
+
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Write-Host 'This must be run in PowerShell as administrator. Right-click PowerShell, choose "Run as administrator", then run the command again.' -ForegroundColor Red
+  return
+}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
 
