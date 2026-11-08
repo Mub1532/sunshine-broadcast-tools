@@ -399,7 +399,10 @@ $overlay.MicrophoneToggled = [Action[bool]]{
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
 }
 $overlay.Add_EndRequested({
-  if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
+  if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
+    Start-Hidden 'end-stream.ps1' '-fromOverlay'
+    $overlay.Close()
+  }
 })
 
 $endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
