@@ -55,7 +55,7 @@ switch ($action) {
       & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
       & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
     }
-
+    exit 0
   }
   'stop' { Stop-Broadcast }
   'cleanup' { if (Test-Path $streamActivePath) { Stop-Broadcast } }
