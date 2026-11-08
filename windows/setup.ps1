@@ -429,7 +429,7 @@ if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $
 $audioSink = ''
 if ($mode -eq 'broadcast') {
   $deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
-  Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
+  Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Default,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
   $audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
   Remove-Item $deviceCsv -ErrorAction SilentlyContinue
   if (-not $audioDevices) {
@@ -446,6 +446,12 @@ if ($mode -eq 'broadcast') {
   $cable = $audioDevices | Where-Object { $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } |
     Select-Object -First 1
   $audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
+
+  if ($cable.Default -and $speakers) {
+    $savedSpeakers = if (Test-Path $deviceConfigPath) { (Get-Content $deviceConfigPath -Raw | ConvertFrom-Json).speakers } else { '' }
+    $defaultSpeakers = if ($savedSpeakers -in $speakers.'Command-Line Friendly ID') { $savedSpeakers } else { $speakers[0].'Command-Line Friendly ID' }
+    & $svclPath /SetDefault $defaultSpeakers all
+  }
 }
 
 $savedConfig = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
@@ -557,6 +563,8 @@ function Save-Config {
       camera     = [string]$cameraList.SelectedItem
       options    = Get-Options
     } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
+    & $svclPath /SetDefault $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID' all
+    & $svclPath /SetDefault $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID' all
     $true
   }
   catch {
