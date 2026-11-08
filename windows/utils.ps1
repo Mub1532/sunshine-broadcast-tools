@@ -141,13 +141,24 @@ function Show-Choice([string]$message, [string[]]$choices) {
   [int]$form.Tag
 }
 
+function New-RecordIcon {
+  $iconFont = if ((New-Object System.Drawing.Text.InstalledFontCollection).Families.Name -contains 'Segoe Fluent Icons') { 'Segoe Fluent Icons' } else { 'Segoe MDL2 Assets' }
+  $bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.TextRenderingHint = 'AntiAliasGridFit'
+  $font = New-Object System.Drawing.Font($iconFont, 20, [System.Drawing.GraphicsUnit]::Pixel)
+  $format = New-Object System.Drawing.StringFormat -Property @{ Alignment = 'Center'; LineAlignment = 'Center' }
+  $graphics.DrawString([string][char]0xE7C8, $font, [System.Drawing.Brushes]::Red, (New-Object System.Drawing.RectangleF(0, 0, 32, 32)), $format)
+  $graphics.Dispose()
+  [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
+}
+
 function New-EndTrayIcon([scriptblock]$onEnd) {
-  $sunshineExe = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
   $menu = New-Object System.Windows.Forms.ContextMenuStrip
   $menu.Items.Add($scriptConfig.endButton).Add_Click($onEnd) | Out-Null
   $tray = New-Object System.Windows.Forms.NotifyIcon -Property @{
     Text             = $scriptConfig.title
-    Icon             = if (Test-Path $sunshineExe) { [System.Drawing.Icon]::ExtractAssociatedIcon($sunshineExe) } else { [System.Drawing.SystemIcons]::Application }
+    Icon             = New-RecordIcon
     ContextMenuStrip = $menu
     Visible          = $true
   }
