@@ -56,7 +56,8 @@ try {
       Move-Item $backupDir $originalDir
       Copy-Item (Join-Path $sourceDir 'windows\restore.ps1') $originalDir -Force
     }
-    & (Join-Path $sourceDir 'windows\backup.ps1') $backupDir
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $sourceDir 'windows\backup.ps1') $backupDir
+    if ($LASTEXITCODE) { throw 'Could not save the current version so it can be undone.' }
   }
 
   $keptDir = Join-Path $tempDir 'kept'
