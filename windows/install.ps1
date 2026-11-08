@@ -93,6 +93,11 @@ try {
   }
 
   Write-Host "Installing to $installDir..."
+  $endStream = Join-Path $windowsDir 'end-stream.ps1'
+  if (Test-Path $endStream) {
+    Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$endStream`" -fromOverlay" -WindowStyle Hidden -Wait
+    Start-Sleep -Seconds 2
+  }
   Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
   New-Item $installDir -ItemType Directory -Force | Out-Null
   Copy-Item "$sourceDir\*" $installDir -Recurse -Force
