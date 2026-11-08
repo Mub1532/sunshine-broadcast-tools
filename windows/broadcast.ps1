@@ -151,7 +151,7 @@ public class LidWatcher : NativeWindow {
       [System.Windows.Forms.Application]::DoEvents()
       if ($lidWatcher.Closed) {
         $lidClosed = $true
-        Stop-Stream
+        Start-Hidden 'notice.ps1' '-messageKey sleepEnded -stoppingKey stoppingLidClosed'
         break
       }
       $powerEvents = @(Get-Event -SourceIdentifier 'PowerChange' -ErrorAction SilentlyContinue)
@@ -176,10 +176,7 @@ public class LidWatcher : NativeWindow {
       }
     }
 
-    if ($lidClosed) {
-      Start-Hidden 'notice.ps1' '-messageKey sleepEnded'
-    }
-    elseif ($wentToSleep) {
+    if ($wentToSleep) {
       while (-not $hasWoken) {
         $powerEvent = Wait-Event -SourceIdentifier 'PowerChange' -Timeout 86400
         if (-not $powerEvent) { break }
