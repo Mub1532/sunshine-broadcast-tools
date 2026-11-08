@@ -65,7 +65,16 @@ function New-ScaledForm {
 function Show-Progress([string]$text) {
   $form = New-ScaledForm
   $form.ControlBox = $false
-  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $text; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(300, 0); TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ AutoSize = $true; MinimumSize = New-Object System.Drawing.Size(300, 0); TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $dotTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 400 }
+  $dotTimer.Add_Tick({
+    $label = $form.Controls[0]
+    $label.Tag.dots = $label.Tag.dots % 3 + 1
+    $label.Text = $label.Tag.text + ('.' * $label.Tag.dots)
+  }.GetNewClosure())
+  $form.Add_FormClosed({ $dotTimer.Dispose() }.GetNewClosure())
+  Set-ProgressText $form $text
+  $dotTimer.Start()
   $form.Show()
   Show-OnTop $form
   $form.Refresh()
@@ -73,7 +82,9 @@ function Show-Progress([string]$text) {
 }
 
 function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
-  $form.Controls[0].Text = $text
+  $label = $form.Controls[0]
+  $label.Tag = @{ text = $text.TrimEnd('.'); dots = 3 }
+  $label.Text = $text
   $form.Refresh()
 }
 

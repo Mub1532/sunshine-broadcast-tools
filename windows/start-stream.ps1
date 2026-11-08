@@ -24,9 +24,11 @@ function Test-OverlayReady {
 function Wait-Until([scriptblock]$condition, [int]$timeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($timeoutSeconds)
   do {
-    [System.Windows.Forms.Application]::DoEvents()
     if (& $condition) { return $true }
-    Start-Sleep -Milliseconds 500
+    for ($tick = 0; $tick -lt 5; $tick++) {
+      [System.Windows.Forms.Application]::DoEvents()
+      Start-Sleep -Milliseconds 100
+    }
   } until ((Get-Date) -gt $deadline)
   $false
 }
