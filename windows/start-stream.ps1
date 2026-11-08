@@ -1,9 +1,12 @@
 #  when u click start stream, it starts sunshine, checks the name of it, so it can tell you the name to select in moonlight etc, starts the mic routing and show the ready message.
 
+param([switch]$skipUpdateCheck)
+
 . "$PSScriptRoot\utils.ps1"
+Enable-SharpText
 
 if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
-  Show-Message $scriptConfig.sunshineMissing 'Error' | Out-Null
+  Show-Message $messageConfig.sunshineMissing 'Error' | Out-Null
   exit 1
 }
 
@@ -21,9 +24,11 @@ function Test-OverlayReady {
 function Wait-Until([scriptblock]$condition, [int]$timeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($timeoutSeconds)
   do {
-    [System.Windows.Forms.Application]::DoEvents()
     if (& $condition) { return $true }
-    Start-Sleep -Milliseconds 500
+    for ($tick = 0; $tick -lt 5; $tick++) {
+      [System.Windows.Forms.Application]::DoEvents()
+      Start-Sleep -Milliseconds 100
+    }
   } until ((Get-Date) -gt $deadline)
   $false
 }
@@ -37,25 +42,42 @@ if (Test-Path $sunshineConf) {
   $portLine = Select-String -Path $sunshineConf -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
   if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
-$readyMessage = Format-Text $scriptConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
+$readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
-$progressForm = New-Object System.Windows.Forms.Form -Property @{
-  Text            = $scriptConfig.title
-  ClientSize      = New-Object System.Drawing.Size(340, 90)
-  StartPosition   = 'CenterScreen'
-  FormBorderStyle = 'FixedDialog'
-  ControlBox      = $false
-  TopMost         = $true
+$launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -ne 'Valid') {
+  try { Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -renewLauncher" -Verb RunAs -WindowStyle Hidden }
+  catch {}
 }
-$progressForm.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-  Text      = $scriptConfig.starting
-  Dock      = 'Fill'
-  TextAlign = 'MiddleCenter'
-  Font      = New-Object System.Drawing.Font('Segoe UI', 11)
-}))
-$progressForm.Show()
-Show-OnTop $progressForm
-$progressForm.Refresh()
+
+$startingSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $startingName)
+$progressForm = Show-Progress $messageConfig.checkingUpdates
+if (-not $skipUpdateCheck) {
+  $installed = Get-InstalledVersion
+  $latestCommit = Get-LatestCommit $installed.branch
+  if ($latestCommit -and $latestCommit -ne $installed.commit) {
+    $progressForm.Hide()
+    $choice = Show-Choice $messageConfig.updateAvailable @($messageConfig.updateNow, $messageConfig.updateSkip)
+    $progressForm.Show()
+    Show-OnTop $progressForm
+    $updateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'update.ps1')`" -branch $($installed.branch) -commit $latestCommit"
+    if ($choice -eq 0) {
+      Set-ProgressText $progressForm $messageConfig.updating
+      try {
+        $updateProcess = Start-Process powershell $updateArgs -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP -PassThru
+        Wait-Until { $updateProcess.HasExited } 600 | Out-Null
+        if ($updateProcess.ExitCode -eq 0) {
+          $progressForm.Close()
+          Start-Hidden 'start-stream.ps1' '-skipUpdateCheck'
+          exit
+        }
+        Show-Message $messageConfig.updateFailed 'Warning' | Out-Null
+      }
+      catch {}
+    }
+  }
+}
+Set-ProgressText $progressForm $messageConfig.starting
 
 & (Join-Path $appDir 'broadcast.ps1') start
 Start-Hidden 'webcam-overlay.ps1'
@@ -65,7 +87,7 @@ if (-not (Test-SunshineReady)) {
   if (-not (Wait-Until { Test-SunshineReady } 60)) {
     & (Join-Path $appDir 'broadcast.ps1') stop
     $progressForm.Close()
-    Show-Message $scriptConfig.startFailed 'Error' | Out-Null
+    Show-Message $messageConfig.startFailed 'Error' | Out-Null
     exit 1
   }
 }
@@ -74,4 +96,5 @@ Start-Hidden 'broadcast.ps1' 'guard -session'
 Wait-Until { Test-OverlayReady } 20 | Out-Null
 
 $progressForm.Close()
+$startingSignal.Dispose()
 Show-Message $readyMessage | Out-Null

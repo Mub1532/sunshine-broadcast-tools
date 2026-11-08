@@ -226,7 +226,13 @@ public class OverlayForm : Form {
     microphoneButton.Button.Click += (sender, args) => ToggleMicrophone();
     Shown += (sender, args) => StartPlayer();
     LocationChanged += (sender, args) => PlaceButtons();
-    FormClosed += (sender, args) => { mpvTimer.Stop(); Mpv.Destroy(player); };
+    FormClosing += (sender, args) => Hide();
+    FormClosed += (sender, args) => {
+      mpvTimer.Stop();
+      var closingPlayer = player;
+      player = IntPtr.Zero;
+      System.Threading.ThreadPool.QueueUserWorkItem(state => Mpv.Destroy(closingPlayer));
+    };
     mpvTimer.Tick += (sender, args) => CheckPlayer();
   }
 
@@ -240,8 +246,13 @@ public class OverlayForm : Form {
     microphoneButton.SetLook(microphoneOn ? Grey : Red, microphoneOn ? tips[2] : tips[3]);
   }
 
-  void StartPlayer() {
+  public void ShowEndButton() {
+    if (endButton.Visible) return;
     endButton.Show(this);
+    PlaceButtons();
+  }
+
+  void StartPlayer() {
     cameraButton.Show(this);
     microphoneButton.Show(this);
     PlaceButtons();
@@ -388,7 +399,20 @@ $overlay.MicrophoneToggled = [Action[bool]]{
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
 }
 $overlay.Add_EndRequested({
-  if ((Show-Message $scriptConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
+  if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
+    Start-Hidden 'end-stream.ps1' '-fromOverlay'
+    $overlay.Close()
+  }
 })
 
+$endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
+$endButtonTimer.Add_Tick({
+  $startingSignal = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($startingName, [ref]$startingSignal)) { $startingSignal.Dispose(); return }
+  $endButtonTimer.Stop()
+  $overlay.ShowEndButton()
+})
+$overlay.Add_Shown({ $endButtonTimer.Start() })
+
 [System.Windows.Forms.Application]::Run($overlay)
+[Environment]::Exit(0)

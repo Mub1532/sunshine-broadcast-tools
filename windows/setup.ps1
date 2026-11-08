@@ -1,18 +1,34 @@
-param([string]$applyFrom)
+param([string]$applyFrom, [switch]$renewLauncher)
 
 . "$PSScriptRoot\utils.ps1"
+
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+  try {
+    if (Test-Path $launcherPath) { Start-Process $launcherPath 'setup.ps1' }
+    else { Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs }
+  }
+  catch {}
+  exit
+}
 
 function Write-Utf8File([string]$path, [string]$content) {
   [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Update-SunshineConf([string]$audioSink) {
+function Update-SunshineConf([string]$audioSink, $options) {
+  $wanted = [ordered]@{}
+  if ($options.disableInput) { $wanted.keyboard = 'disabled'; $wanted.mouse = 'disabled'; $wanted.controller = 'disabled' }
+  if ($options.vigemDriver) { $wanted.gamepad_driver = 'vigembus' }
+  if ($options.disableSteamAudio) { $wanted.install_steam_audio_drivers = 'disabled' }
   $confPath = Join-Path $sunshineConfigDir 'sunshine.conf'
   $keptLines = @()
   if (Test-Path $confPath) {
     Copy-Item $confPath "$confPath.bak" -Force
     foreach ($line in Get-Content $confPath) {
-      if ($line -match '^\s*(audio_sink|virtual_sink)\s*=') { continue }
+      if ($line -match '^\s*(audio_sink|virtual_sink|external_audio)\s*=') { continue }
+      if ($line -match '^\s*(\w+)\s*=' -and $wanted.Contains($Matches[1])) { continue }
       if ($line -match '^\s*global_prep_cmd\s*=\s*(.+)$') {
         $otherCommands = @(($Matches[1] | ConvertFrom-Json) | Where-Object { $_.do -notmatch '(stream|broadcast)\.ps1' })
         if ($otherCommands.Count) { $keptLines += 'global_prep_cmd = ' + (ConvertTo-Json -InputObject $otherCommands -Compress -Depth 3) }
@@ -22,10 +38,13 @@ function Update-SunshineConf([string]$audioSink) {
     }
   }
   $keptLines += "audio_sink = $audioSink"
+  $keptLines += "virtual_sink = $audioSink"
+  $keptLines += "external_audio = enabled"
+  foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps {
+function Update-SunshineApps([bool]$removeOthers) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -43,7 +62,8 @@ function Update-SunshineApps {
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $apps.apps = @($apps.apps | Where-Object { $_.name -ne $scriptConfig.appName }) + $broadcastApp
+  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -ne $scriptConfig.appName })
+  $apps.apps = $otherApps + $broadcastApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
 
@@ -54,10 +74,64 @@ function Install-SunshineService {
   if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) { throw 'The Sunshine service is missing. Reinstall Sunshine as administrator.' }
 }
 
+function Get-ExcludedPortRanges([string]$protocol) {
+  foreach ($line in (netsh int ipv4 show excludedportrange protocol=$protocol)) {
+    if ($line -match '^\s*(\d+)\s+(\d+)\s*(\*)?\s*$') {
+      [pscustomobject]@{ Start = [int]$Matches[1]; End = [int]$Matches[2]; Ours = [bool]$Matches[3] }
+    }
+  }
+}
+
+function Test-PortsFree([int]$basePort) {
+  $first = $basePort - 5
+  $last = $basePort + 21
+  foreach ($protocol in 'tcp', 'udp') {
+    foreach ($range in (Get-ExcludedPortRanges $protocol)) {
+      if ($range.Ours -and $range.Start -eq $first -and $range.End -eq $last) { continue }
+      if ($range.Start -le $last -and $range.End -ge $first) { return $false }
+    }
+  }
+  $listening = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalPort -ge $first -and $_.LocalPort -le $last -and $_.OwningProcess -notin @(Get-Process sunshine -ErrorAction SilentlyContinue).Id }
+  -not $listening
+}
+
+function Set-SunshinePorts {
+  $confPath = Join-Path $sunshineConfigDir 'sunshine.conf'
+  $basePort = 47989
+  if (Test-Path $confPath) {
+    $portLine = Select-String -Path $confPath -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
+    if ($portLine) { $basePort = [int]$portLine.Matches[0].Groups[1].Value }
+  }
+  if (Test-PortsFree $basePort) { return }
+
+  $newPort = 48089..48989 | Where-Object { $_ % 100 -eq 89 } | Where-Object { Test-PortsFree $_ } | Select-Object -First 1
+  if (-not $newPort) { throw 'No free ports found for Sunshine.' }
+  $lines = @(if (Test-Path $confPath) { Get-Content $confPath | Where-Object { $_ -notmatch '^\s*port\s*=' } })
+  Write-Utf8File $confPath ((($lines + "port = $newPort") -join "`r`n") + "`r`n")
+
+  net stop winnat 2>&1 | Out-Null
+  try {
+    foreach ($protocol in 'tcp', 'udp') {
+      netsh int ipv4 add excludedportrange protocol=$protocol startport=$($newPort - 5) numberofports=27 store=persistent | Out-Null
+    }
+  }
+  finally { net start winnat 2>&1 | Out-Null }
+}
+
 function Add-FirewallRules {
   $sunshinePath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
   Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   New-NetFirewallRule -DisplayName 'Sunshine Broadcast' -Direction Inbound -Program $sunshinePath -Action Allow -Profile Any | Out-Null
+}
+
+function Set-DefaultCredentials {
+  $statePath = Join-Path $sunshineConfigDir 'sunshine_state.json'
+  if (Test-Path $statePath) {
+    $state = Get-Content $statePath -Raw | ConvertFrom-Json
+    if ($state.username) { return }
+  }
+  & (Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe') --creds admin admin | Out-Null
 }
 
 function Grant-ServiceControl {
@@ -69,14 +143,135 @@ function Grant-ServiceControl {
   sc.exe config $serviceName start= demand | Out-Null
 }
 
-function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [string]$icon) {
+$sunshineIconPath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
+
+function Install-Launcher {
+  $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+  if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -eq 'Valid') { return $launcherPath }
+
+  $buildDir = Join-Path $env:TEMP 'sunshine-broadcast-launcher'
+  New-Item $buildDir -ItemType Directory -Force | Out-Null
+  $sourcePath = Join-Path $buildDir 'launcher.cs'
+  $manifestPath = Join-Path $buildDir 'launcher.manifest'
+  Write-Utf8File $sourcePath @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
+
+[assembly: AssemblyTitle("Sunshine Broadcast Tools")]
+[assembly: AssemblyProduct("Sunshine Broadcast Tools")]
+[assembly: AssemblyCompany("Mubashar Khan")]
+
+static class Launcher {
+  static void Main(string[] args) {
+    if (args.Length == 0) return;
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
+    string extra = string.Join(" ", args, 1, args.Length - 1);
+    Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
+      UseShellExecute = false,
+      CreateNoWindow = true
+    });
+  }
+}
+'@
+  Write-Utf8File $manifestPath @'
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false" /></requestedPrivileges></security>
+  </trustInfo>
+</assembly>
+'@
+  $iconPath = Join-Path $buildDir 'launcher.ico'
+  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Runtime.InteropServices;
+
+public static class IconBuilder {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  static extern uint PrivateExtractIcons(string file, int index, int width, int height, IntPtr[] icons, uint[] ids, uint count, uint flags);
+  [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+
+  public static void Save(string exePath, string icoPath) {
+    int[] sizes = { 256, 64, 48, 32, 24, 16 };
+    var images = new byte[sizes.Length][];
+    for (int i = 0; i < sizes.Length; i++) {
+      var handles = new IntPtr[1];
+      PrivateExtractIcons(exePath, 0, sizes[i], sizes[i], handles, null, 1, 0);
+      using (var bitmap = Icon.FromHandle(handles[0]).ToBitmap())
+      using (var png = new MemoryStream()) {
+        bitmap.Save(png, ImageFormat.Png);
+        images[i] = png.ToArray();
+      }
+      DestroyIcon(handles[0]);
+    }
+    using (var writer = new BinaryWriter(File.Create(icoPath))) {
+      writer.Write((short)0); writer.Write((short)1); writer.Write((short)sizes.Length);
+      int offset = 6 + 16 * sizes.Length;
+      for (int i = 0; i < sizes.Length; i++) {
+        writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i])); writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));
+        writer.Write((byte)0); writer.Write((byte)0); writer.Write((short)1); writer.Write((short)32);
+        writer.Write(images[i].Length); writer.Write(offset);
+        offset += images[i].Length;
+      }
+      foreach (var image in images) writer.Write(image);
+    }
+  }
+}
+'@
+  [IconBuilder]::Save($sunshineIconPath, $iconPath)
+  $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" $sourcePath 2>&1
+  if ($LASTEXITCODE) { throw "Could not build the launcher: $($compilerOutput -join ' ')" }
+
+  foreach ($store in 'Root', 'TrustedPublisher') {
+    Get-ChildItem "Cert:\LocalMachine\$store" | Where-Object Subject -eq 'CN=Mubashar Khan' | Remove-Item
+  }
+  $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Mubashar Khan' -FriendlyName 'Mubashar Khan Sunshine Broadcast Tools Certificate' `
+    -CertStoreLocation 'Cert:\LocalMachine\My' -NotAfter (Get-Date).AddYears(30)
+  try {
+    $publicPath = Join-Path $buildDir 'publisher.cer'
+    Export-Certificate -Cert $certificate -FilePath $publicPath | Out-Null
+    foreach ($store in 'Root', 'TrustedPublisher') { Import-Certificate -FilePath $publicPath -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null }
+    $signature = Set-AuthenticodeSignature $launcherPath $certificate -HashAlgorithm SHA256
+    if ($signature.Status -ne 'Valid') { throw "Could not sign the launcher: $($signature.StatusMessage)" }
+  }
+  finally {
+    Remove-Item "Cert:\LocalMachine\My\$($certificate.Thumbprint)" -DeleteKey
+    Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $launcherPath
+}
+
+function New-LauncherShortcut([string]$name, [string]$script, [string]$tip, [string]$icon) {
   $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut((Join-Path $env:PUBLIC "Desktop\$name.lnk"))
-  $shortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'
-  $shortcut.Arguments = (Get-HiddenCommand $script) -replace '^conhost\.exe ', ''
+  $shortcut = $shell.CreateShortcut((Join-Path (Join-Path $env:PUBLIC 'Desktop') "$name.lnk"))
+  $shortcut.TargetPath = Install-Launcher
+  $shortcut.Arguments = $script
+  $shortcut.WorkingDirectory = $appDir
   $shortcut.Description = $tip
   $shortcut.IconLocation = $icon
   $shortcut.Save()
+}
+
+function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [string]$icon, [string]$folder = (Join-Path $env:PUBLIC 'Desktop'), [string]$arguments = '') {
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut((Join-Path $folder "$name.lnk"))
+  $shortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'
+  $shortcut.Arguments = (Get-HiddenCommand $script $arguments) -replace '^conhost\.exe ', ''
+  $shortcut.Description = $tip
+  $shortcut.IconLocation = $icon
+  $shortcut.Save()
+}
+
+if ($renewLauncher) {
+  Start-Sleep -Seconds 2
+  Remove-Item (Join-Path $appDir 'Sunshine Broadcast Tools.exe') -Force -ErrorAction SilentlyContinue
+  try { Install-Launcher | Out-Null; exit 0 } catch { exit 1 }
 }
 
 if ($applyFrom) {
@@ -86,11 +281,14 @@ if ($applyFrom) {
     $steps = [ordered]@{
       'Service'   = { Install-SunshineService; Grant-ServiceControl }
       'Firewall'  = { Add-FirewallRules }
-      'Config'    = { Update-SunshineConf $request.audioSink }
-      'Apps'      = { Update-SunshineApps }
+      'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
+      'Ports'     = { Set-SunshinePorts }
+      'Config'    = { Update-SunshineConf $request.audioSink $request.options }
+      'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
-        New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$env:ProgramFiles\Sunshine\sunshine.exe,0"
-        New-DesktopShortcut $scriptConfig.endShortcut 'end-stream.ps1' $scriptConfig.endShortcutTip "$env:windir\System32\shell32.dll,27"
+        New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
+        $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
+        New-DesktopShortcut 'Sunshine Broadcast Cleanup' 'broadcast.ps1' 'Restore audio if a stream was left running' "$env:windir\System32\shell32.dll,27" $startupFolder 'cleanup'
       }
     }
     foreach ($step in $steps.GetEnumerator()) {
@@ -111,8 +309,22 @@ if ($applyFrom) {
   }
 }
 
+$setupShown = $null
+if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
+$restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
+$menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
+if (Test-Path $restoreScript) { $menuChoices += $scriptConfig.undoButton }
+do {
+  $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
+  if ($menuChoice -eq 2) {
+    Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+    exit
+  }
+  if ($menuChoice -lt 0) { exit }
+} while ($menuChoice -ne 0)
+
 if (-not (Test-Path $svclPath)) {
-  Show-Message (Format-Text $scriptConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
+  Show-Message (Format-Text $messageConfig.svclMissing @{ folder = $appDir }) 'Error' | Out-Null
   exit 1
 }
 
@@ -121,7 +333,7 @@ Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,D
 $audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
 Remove-Item $deviceCsv -ErrorAction SilentlyContinue
 if (-not $audioDevices) {
-  Show-Message $scriptConfig.devicesUnreadable 'Error' | Out-Null
+  Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
   exit 1
 }
 
@@ -190,16 +402,29 @@ $copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text 
 $copyButton.Enabled = [bool]$audioSink
 $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 
+$optionBoxes = [ordered]@{}
+foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio') {
+  $checked = [bool]$savedConfig.options.$option
+  $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; AutoSize = $true }) 26
+}
+$script:nextTop += 10
+
 $warnings = @()
-if (-not $cable) { $warnings += $scriptConfig.cableMissing }
-if (-not (Test-Path $libmpvPath)) { $warnings += $scriptConfig.mpvMissing }
+if (-not $cable) { $warnings += $messageConfig.cableMissing }
+if (-not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
 }
 
+function Get-Options {
+  $options = [ordered]@{}
+  foreach ($box in $optionBoxes.GetEnumerator()) { $options[$box.Key] = $box.Value.Checked }
+  $options
+}
+
 function Save-Config {
   if ($speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) {
-    Show-Message $scriptConfig.selectDevices 'Warning' | Out-Null
+    Show-Message $messageConfig.selectDevices 'Warning' | Out-Null
     return $false
   }
   try {
@@ -207,11 +432,12 @@ function Save-Config {
       speakers   = $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID'
       microphone = $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID'
       camera     = [string]$cameraList.SelectedItem
+      options    = Get-Options
     } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
     $true
   }
   catch {
-    Show-Message (Format-Text $scriptConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+    Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
     $false
   }
 }
@@ -221,35 +447,38 @@ function Invoke-Apply {
   $requestPath = Join-Path $env:TEMP 'sunshine-broadcast-apply.json'
   $errorPath = "$requestPath.err"
   Remove-Item $errorPath -ErrorAction SilentlyContinue
-  @{ audioSink = $audioSink } | ConvertTo-Json | Set-Content $requestPath
+  @{ audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
 
   try {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
       -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     switch ($applyProcess.ExitCode) {
-      0 { Show-Message $scriptConfig.applied | Out-Null }
-      3 { Show-Message "$($scriptConfig.applied)`n`n$($scriptConfig.restarted)" | Out-Null }
+      0 { Show-Message "$($messageConfig.applied)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
+      3 { Show-Message "$($messageConfig.applied)`n`n$($messageConfig.restarted)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
       default {
         $details = if (Test-Path $errorPath) { Get-Content $errorPath -Raw } else { '' }
-        Show-Message (Format-Text $scriptConfig.applyFailed @{ error = $details }) 'Error' | Out-Null
+        Show-Message (Format-Text $messageConfig.applyFailed @{ error = $details }) 'Error' | Out-Null
       }
     }
   }
   catch {
-    Show-Message $scriptConfig.adminRequired 'Warning' | Out-Null
+    Show-Message $messageConfig.adminRequired 'Warning' | Out-Null
   }
   Remove-Item $requestPath, $errorPath -ErrorAction SilentlyContinue
 }
 
-$saveButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.saveButton; Height = 34 }) 0 20 120
 $applyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.applyButton; Height = 34 }) 50 300 180
-$applyButton.Enabled = [bool]$audioSink
-$saveButton.Add_Click({ if (Save-Config) { Show-Message $scriptConfig.saved | Out-Null } })
-$applyButton.Add_Click({ Invoke-Apply })
+$applyButton.Add_Click({
+  if ($audioSink) { Invoke-Apply }
+  elseif (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
+})
 
-$setupForm.ClientSize = New-Object System.Drawing.Size(500, $script:nextTop)
+$formWidth = [Math]::Max(500, ($optionBoxes.Values | ForEach-Object { $_.Right } | Measure-Object -Maximum).Maximum + 20)
+$setupForm.ClientSize = New-Object System.Drawing.Size($formWidth, $script:nextTop)
 $setupForm.Add_Shown({
   Show-OnTop $setupForm
   $setupForm.TopMost = $false
+  $setupShown = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
 })
 [void]$setupForm.ShowDialog()

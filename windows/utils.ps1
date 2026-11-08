@@ -8,6 +8,12 @@ $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
 $scriptConfig = Get-Content (Join-Path $repoDir 'scriptConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$messagesPath = Join-Path $repoDir 'messageConfig.json'
+$defaultMessagesPath = Join-Path $repoDir 'messageConfig.default.json'
+if (-not (Test-Path $messagesPath) -and (Test-Path $defaultMessagesPath)) {
+  try { Copy-Item $defaultMessagesPath $messagesPath } catch {}
+}
+$messageConfig = Get-Content $(if (Test-Path $messagesPath) { $messagesPath } else { $defaultMessagesPath }) -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $serviceName = 'SunshineService'
 $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'
@@ -16,6 +22,10 @@ $stopEventName = 'Local\SunshineBroadcastStop'
 $sessionLockName = 'Local\SunshineBroadcastSession'
 $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
 $overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
+$startingName = 'Local\SunshineBroadcastStarting'
+$streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
+$clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
+$versionPath = Join-Path $repoDir 'version.json'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -33,6 +43,119 @@ function Show-Message([string]$message, [string]$icon = 'Information', [string]$
   $owner.Activate()
   try { [System.Windows.Forms.MessageBox]::Show($owner, $message, $scriptConfig.title, $buttons, $icon) }
   finally { $owner.Dispose() }
+}
+
+function Enable-SharpText {
+  Import-CSharp 'SharpText' 'public static class SharpText { [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
+  [SharpText]::SetProcessDPIAware() | Out-Null
+}
+
+function Get-Scale {
+  $graphics = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+  try { $graphics.DpiX / 96 } finally { $graphics.Dispose() }
+}
+
+function New-ScaledForm {
+  New-Object System.Windows.Forms.Form -Property @{
+    Text            = $scriptConfig.title
+    StartPosition   = 'CenterScreen'
+    FormBorderStyle = 'FixedDialog'
+    MaximizeBox     = $false
+    MinimizeBox     = $false
+    TopMost         = $true
+    Font            = New-Object System.Drawing.Font('Segoe UI', 10)
+  }
+}
+
+function Show-Progress([string]$text) {
+  $scale = Get-Scale
+  $form = New-ScaledForm
+  $form.ControlBox = $false
+  $form.ClientSize = New-Object System.Drawing.Size([int](340 * $scale), [int](90 * $scale))
+  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Dock = 'Fill'; TextAlign = 'MiddleLeft'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $dotTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 400 }
+  $dotTimer.Add_Tick({
+    $label = $form.Controls[0]
+    $label.Tag.dots = $label.Tag.dots % 3 + 1
+    $label.Text = $label.Tag.text + ('.' * $label.Tag.dots)
+  }.GetNewClosure())
+  $form.Add_FormClosed({ $dotTimer.Dispose() }.GetNewClosure())
+  Set-ProgressText $form $text
+  $dotTimer.Start()
+  $form.Show()
+  Show-OnTop $form
+  $form.Refresh()
+  $form
+}
+
+function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
+  $label = $form.Controls[0]
+  $label.Tag = @{ text = $text.TrimEnd('.'); dots = 3 }
+  $fullWidth = [System.Windows.Forms.TextRenderer]::MeasureText($label.Tag.text + '...', $label.Font).Width
+  $neededWidth = $fullWidth + [int](60 * (Get-Scale))
+  if ($form.ClientSize.Width -lt $neededWidth) {
+    $form.ClientSize = New-Object System.Drawing.Size($neededWidth, $form.ClientSize.Height)
+    $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $form.Location = New-Object System.Drawing.Point([int]($screen.Left + ($screen.Width - $form.Width) / 2), [int]($screen.Top + ($screen.Height - $form.Height) / 2))
+  }
+  $label.Padding = New-Object System.Windows.Forms.Padding([Math]::Max(0, [int](($label.ClientSize.Width - $fullWidth) / 2)), 0, 0, 0)
+  $label.Text = $label.Tag.text + '...'
+  $form.Refresh()
+}
+
+function Show-Choice([string]$message, [string[]]$choices) {
+  $scale = Get-Scale
+  $pad = [int](20 * $scale)
+  $gap = [int](8 * $scale)
+  $form = New-ScaledForm
+  $form.ShowInTaskbar = $true
+
+  $textSize = [System.Windows.Forms.TextRenderer]::MeasureText($message, $form.Font, (New-Object System.Drawing.Size([int](440 * $scale), 0)), 'WordBreak')
+  $label = New-Object System.Windows.Forms.Label -Property @{ Text = $message; TextAlign = 'MiddleCenter' }
+  $form.Controls.Add($label)
+
+  $buttons = @()
+  for ($index = 0; $index -lt $choices.Count; $index++) {
+    $button = New-Object System.Windows.Forms.Button -Property @{ Text = $choices[$index]; Tag = $index; AutoSize = $true; MinimumSize = New-Object System.Drawing.Size([int](100 * $scale), [int](32 * $scale)); Padding = New-Object System.Windows.Forms.Padding($gap, 0, $gap, 0) }
+    $button.Add_Click({ $this.FindForm().Tag = $this.Tag; $this.FindForm().Close() })
+    $form.Controls.Add($button)
+    $buttons += $button
+  }
+  $widestButton = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Maximum).Maximum
+  $contentWidth = [Math]::Max($textSize.Width, $widestButton * $buttons.Count + $gap * ($buttons.Count - 1))
+  $buttonWidth = [int](($contentWidth - $gap * ($buttons.Count - 1)) / $buttons.Count)
+  $label.SetBounds($pad, $pad, $contentWidth, $textSize.Height + [int](4 * $scale))
+  $buttonTop = $label.Bottom + [int](20 * $scale)
+  $left = $pad
+  foreach ($button in $buttons) {
+    $button.AutoSize = $false
+    $button.Size = New-Object System.Drawing.Size($buttonWidth, $buttons[0].Height)
+    $button.Location = New-Object System.Drawing.Point($left, $buttonTop)
+    $left += $buttonWidth + $gap
+  }
+  $form.ClientSize = New-Object System.Drawing.Size(($contentWidth + $pad * 2), ($buttonTop + $buttons[0].Height + $pad))
+  $form.AcceptButton = $buttons[0]
+  $form.Tag = -1
+  $form.Add_Shown({ Show-OnTop $this })
+  [void]$form.ShowDialog()
+  [int]$form.Tag
+}
+
+function Get-InstalledVersion {
+  if (Test-Path $versionPath) { return Get-Content $versionPath -Raw | ConvertFrom-Json }
+  [pscustomobject]@{ branch = 'main'; commit = '' }
+}
+
+function Get-LatestCommit([string]$branch) {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try { return (Invoke-RestMethod "https://api.github.com/repos/Mub1532/sunshine-broadcast-tools/commits/$branch" -TimeoutSec 3 -UseBasicParsing).sha }
+  catch {}
+  try {
+    $feed = Invoke-WebRequest "https://github.com/Mub1532/sunshine-broadcast-tools/commits/$branch.atom" -TimeoutSec 3 -UseBasicParsing
+    if ($feed.Content -match 'Commit/([0-9a-f]{40})') { return $Matches[1] }
+  }
+  catch {}
+  ''
 }
 
 function Get-HiddenCommand([string]$script, [string]$arguments = '') {
@@ -60,6 +183,6 @@ function Import-CSharp([string]$name, [string]$source, [string[]]$references = @
 }
 
 function Stop-Stream {
-  Start-Process sc.exe "stop $serviceName" -WindowStyle Hidden -Wait
   & (Join-Path $appDir 'broadcast.ps1') stop
+  Start-Process sc.exe "stop $serviceName" -WindowStyle Hidden -Wait
 }

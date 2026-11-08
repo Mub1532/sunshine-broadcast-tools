@@ -49,6 +49,8 @@ irm https://raw.githubusercontent.com/Mub1532/sunshine-broadcast-tools/main/wind
 
 This downloads the latest version, installs it to `C:\ProgramData\sunshine-broadcast-tools` and opens Setup. Run the same command again to update.
 
+In Setup, choose the speakers, microphone, camera and any options, then click **Save / Apply to Sunshine**. Setup closes once it's done.
+
 ## Linux
 
 WIP

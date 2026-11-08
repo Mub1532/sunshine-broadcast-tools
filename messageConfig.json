@@ -1,0 +1,32 @@
+{
+  "checkingUpdates": "Checking for updates...",
+  "updateAvailable": "An update is available for Sunshine Broadcast Tools. Do you want to update?",
+  "updateNow": "Update Now",
+  "updateSkip": "Later",
+  "updating": "Updating...",
+  "updateFailed": "The update didn't work. The stream will start with the current version.",
+  "starting": "Starting stream, please wait...",
+  "ready": "Stream is running.\n\nOn the viewing device, open Moonlight, select \"{host}\" and then \"{app}\".",
+  "sunshineMissing": "Sunshine is not installed on this computer.",
+  "startFailed": "Stream could not be started.\n\nCheck that the Sunshine service is installed and that users are allowed to start it.",
+
+  "endConfirm": "End the stream?\n\nThe stream will disconnect and Sunshine will stop.",
+  "ended": "Stream ended.",
+  "disconnected": "{device} Disconnected. If this was not on purpose, please go to {device} and connect again.",
+  "unknownDevice": "the device",
+  "disconnectedVia": "Disconnected via: {reason}",
+  "stoppingLidClosed": "Stopping stream because the laptop was put to sleep...",
+  "sleepEnded": "Sunshine stream ended because you put the laptop to sleep.",
+
+  "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",
+  "mpvMissing": "libmpv-2.dll was not found. The webcam overlay will not open. Run the installer again.",
+  "svclMissing": "svcl.exe was not found in:\n{folder}\n\nDownload svcl from nirsoft.net, place svcl.exe in this folder and run Setup again.",
+  "devicesUnreadable": "Could not read audio devices.",
+  "selectDevices": "Select speakers and a microphone.",
+  "saved": "Settings saved.",
+  "saveFailed": "Could not save settings:\n{error}",
+  "applied": "Sunshine has been configured and the Start & End shortcuts were added to the desktop.",
+  "restarted": "Sunshine was restarted to apply the changes.",
+  "applyFailed": "Could not configure Sunshine:\n{error}",
+  "adminRequired": "Administrator permission is required to configure Sunshine."
+}
