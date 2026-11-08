@@ -14,7 +14,7 @@ $silent = [bool]$sbtSilent
 $commit = [string]$sbtCommit
 $installDir = Join-Path $env:ProgramData $repoName
 $windowsDir = Join-Path $installDir 'windows'
-$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe'
+$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe', 'broadcast-config-backup', 'casting-config-backup'
 
 $tempDir = Join-Path $env:TEMP "$repoName-install"
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -89,7 +89,7 @@ try {
     if (-not (Test-Path $existing)) { continue }
     $backup = Join-Path $keptDir $file
     New-Item (Split-Path $backup) -ItemType Directory -Force | Out-Null
-    Copy-Item $existing $backup
+    Copy-Item $existing $backup -Recurse
   }
 
   Write-Host "Installing to $installDir..."

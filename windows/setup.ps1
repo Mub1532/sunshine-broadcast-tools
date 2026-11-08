@@ -326,6 +326,30 @@ if ($menuChoice -eq 2) {
 if ($menuChoice -lt 0) { exit }
 $mode = if ($menuChoice -eq 1) { 'casting' } else { 'broadcast' }
 
+function Switch-ModeConfig([string]$fromMode, [string]$toMode) {
+  $modeFiles = @{ 'sunshine.conf' = $sunshineConfigDir; 'apps.json' = $sunshineConfigDir; 'deviceConfig.json' = $appDir }
+  $fromDir = Join-Path $repoDir "$fromMode-config-backup"
+  New-Item $fromDir -ItemType Directory -Force | Out-Null
+  foreach ($file in $modeFiles.GetEnumerator()) {
+    $source = Join-Path $file.Value $file.Key
+    if (Test-Path $source) { Copy-Item $source $fromDir -Force }
+  }
+  $toDir = Join-Path $repoDir "$toMode-config-backup"
+  if (Test-Path $toDir) {
+    foreach ($file in $modeFiles.GetEnumerator()) {
+      $saved = Join-Path $toDir $file.Key
+      if (Test-Path $saved) { Copy-Item $saved $file.Value -Force }
+    }
+  }
+}
+
+$previousConfig = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { $null }
+$previousMode = if ($previousConfig.mode) { $previousConfig.mode } elseif ($previousConfig.speakers) { 'broadcast' } else { '' }
+if ($previousMode -and $previousMode -ne $mode) {
+  try { Switch-ModeConfig $previousMode $mode }
+  catch { Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null; exit 1 }
+}
+
 function Test-CableInstalled {
   [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
 }
