@@ -46,7 +46,7 @@ function Update-SunshineConf([string]$mode, [string]$audioSink, $options) {
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps([string]$mode, [bool]$removeOthers, [bool]$runAsAdmin) {
+function Update-SunshineApps([string]$mode, [bool]$removeOthers, [bool]$runAsAdmin, [bool]$runnerWorks) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -58,7 +58,7 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers, [bool]$runAsAdm
     'name'       = $scriptConfig.appName
     'image-path' = Join-Path $repoDir 'images\desktop-broadcast.png'
     'prep-cmd'   = @([pscustomobject][ordered]@{
-        do       = Get-StartCommand
+        do       = Get-StartCommand $runnerWorks
         undo     = Get-HiddenCommand 'broadcast.ps1' 'release'
         elevated = $runAsAdmin
       })
@@ -142,18 +142,6 @@ static class Runner {
   finally { Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-# runs run-hidden the same way sunshine does and checks our script actually ran
-function Test-Runner {
-  $markerPath = Join-Path $env:TEMP 'sunshine-broadcast-selftest.txt'
-  Remove-Item $markerPath -ErrorAction SilentlyContinue
-  try {
-    $testProcess = Start-Process $runnerPath 'broadcast.ps1 selftest' -PassThru
-    if (-not $testProcess.WaitForExit(30000)) { Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue }
-  }
-  catch { return $false }
-  Test-Path $markerPath
-}
-
 # builds run-hidden, rebuilds once if the test fails, and returns the reason if it still doesnt work
 function Install-WorkingRunner {
   Install-Runner
@@ -162,7 +150,7 @@ function Install-WorkingRunner {
   if (Test-Runner) { return }
   $logPath = Join-Path $env:LOCALAPPDATA 'Sunshine Broadcast Tools\debug.log'
   $reason = if (Test-Path $logPath) { (Get-Content $logPath -Tail 6) -join "`n" } else { 'run-hidden.exe did not start at all (maybe blocked by antivirus)' }
-  "run-hidden.exe doesn't work on this laptop, streams will start with the backup method instead.`n$reason"
+  "run-hidden.exe doesn't work on this laptop, streams will start with the old hidden method instead.`n$reason"
 }
 
 function Install-SunshineService {
@@ -478,7 +466,7 @@ if ($applyFrom -or $repair) {
       'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
       'Apps'      = {
         $runnerProblem = Install-WorkingRunner
-        Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) ($request.options.runAsAdmin -ne $false)
+        Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) ($request.options.runAsAdmin -ne $false) (-not $runnerProblem)
         if ($runnerProblem) { throw $runnerProblem }
       }
       'Shortcuts' = {

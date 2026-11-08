@@ -125,19 +125,25 @@ function Show-Choice([string]$message, [string[]]$choices) {
     $form.Controls.Add($button)
     $buttons += $button
   }
+  # buttons wrap onto new rows like flex-wrap, all the same width, and a shorter last row is centred
   $widestButton = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Maximum).Maximum
-  $contentWidth = [Math]::Max($textSize.Width, $widestButton * $buttons.Count + $gap * ($buttons.Count - 1))
-  $buttonWidth = [int](($contentWidth - $gap * ($buttons.Count - 1)) / $buttons.Count)
+  $buttonHeight = $buttons[0].Height
+  $maxRowWidth = [Math]::Max([int](640 * $scale), $widestButton)
+  $columns = [Math]::Max(1, [Math]::Min($buttons.Count, [Math]::Floor(($maxRowWidth + $gap) / ($widestButton + $gap))))
+  $rows = [Math]::Ceiling($buttons.Count / $columns)
+  $contentWidth = [Math]::Max($textSize.Width, $widestButton * $columns + $gap * ($columns - 1))
+  $buttonWidth = [int](($contentWidth - $gap * ($columns - 1)) / $columns)
   $label.SetBounds($pad, $pad, $contentWidth, $textSize.Height + [int](4 * $scale))
   $buttonTop = $label.Bottom + [int](20 * $scale)
-  $left = $pad
-  foreach ($button in $buttons) {
-    $button.AutoSize = $false
-    $button.Size = New-Object System.Drawing.Size($buttonWidth, $buttons[0].Height)
-    $button.Location = New-Object System.Drawing.Point($left, $buttonTop)
-    $left += $buttonWidth + $gap
+  for ($index = 0; $index -lt $buttons.Count; $index++) {
+    $row = [Math]::Floor($index / $columns)
+    $inRow = [Math]::Min($columns, $buttons.Count - $row * $columns)
+    $rowLeft = $pad + [int](($contentWidth - ($buttonWidth * $inRow + $gap * ($inRow - 1))) / 2)
+    $buttons[$index].AutoSize = $false
+    $buttons[$index].Size = New-Object System.Drawing.Size($buttonWidth, $buttonHeight)
+    $buttons[$index].Location = New-Object System.Drawing.Point(($rowLeft + ($index % $columns) * ($buttonWidth + $gap)), ($buttonTop + $row * ($buttonHeight + $gap)))
   }
-  $form.ClientSize = New-Object System.Drawing.Size(($contentWidth + $pad * 2), ($buttonTop + $buttons[0].Height + $pad))
+  $form.ClientSize = New-Object System.Drawing.Size(($contentWidth + $pad * 2), ($buttonTop + $rows * $buttonHeight + ($rows - 1) * $gap + $pad))
   $form.AcceptButton = $buttons[0]
   $form.Tag = -1
   $form.Add_Shown({ Show-OnTop $this })
@@ -213,9 +219,21 @@ function Get-HiddenCommand([string]$script, [string]$arguments = '') {
   "conhost.exe --headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir $script)`" $arguments".TrimEnd()
 }
 
-# start command for sunshine. if run-hidden fails (not a refusal) it falls back to the old hidden powershell way so the stream still starts
-function Get-StartCommand {
-  "cmd.exe /c `"`"$runnerPath`" broadcast.ps1 start || if not errorlevel 10 $(Get-HiddenCommand 'broadcast.ps1' 'start')`""
+# runs run-hidden the same way sunshine does and checks our script actually ran
+function Test-Runner {
+  $markerPath = Join-Path $env:TEMP 'sunshine-broadcast-selftest.txt'
+  Remove-Item $markerPath -ErrorAction SilentlyContinue
+  try {
+    $testProcess = Start-Process $runnerPath 'broadcast.ps1 selftest' -PassThru
+    if (-not $testProcess.WaitForExit(30000)) { Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue }
+  }
+  catch { return $false }
+  Test-Path $markerPath
+}
+
+# start command for sunshine. uses run-hidden when it works on this laptop, otherwise the old hidden powershell way
+function Get-StartCommand([bool]$runnerWorks) {
+  if ($runnerWorks) { "`"$runnerPath`" broadcast.ps1 start" } else { Get-HiddenCommand 'broadcast.ps1' 'start' }
 }
 
 function Start-Hidden([string]$script, [string]$arguments = '') {
