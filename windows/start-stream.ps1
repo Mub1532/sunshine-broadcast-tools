@@ -78,7 +78,31 @@ if (-not $skipUpdateCheck) {
     }
   }
 }
+function Test-SetupNeedsRepair {
+  if (-not (Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue)) { return $true }
+  if ((Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartMode -ne 'Manual') { return $true }
+  if (-not ((sc.exe sdshow $serviceName) -join '').Contains('(A;;RPWPLC;;;IU)')) { return $true }
+  if (-not (Test-Path $runnerPath)) { return $true }
+  $appsPath = Join-Path $sunshineConfigDir 'apps.json'
+  $modeApp = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
+  if (-not (Test-Path $appsPath) -or -not ((Get-Content $appsPath -Raw | ConvertFrom-Json).apps | Where-Object { $_.name -eq $modeApp -and $_.'prep-cmd' })) { return $true }
+  if (-not $isCasting -and -not (Select-String -Path (Join-Path $sunshineConfigDir 'sunshine.conf') -Pattern '^\s*audio_sink\s*=\s*\S' -Quiet)) { return $true }
+  $false
+}
+
+if ((Test-Path $deviceConfigPath) -and (Test-SetupNeedsRepair)) {
+  Set-ProgressText $progressForm $messageConfig.repairing
+  $repairProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -repair" -WindowStyle Hidden -PassThru
+  Wait-Until { $repairProcess.HasExited } 120 | Out-Null
+}
+
 Set-ProgressText $progressForm $messageConfig.starting
+
+if (-not $isCasting) {
+  $savedDevices = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+  if ($savedDevices.speakers) { & $svclPath /SetDefault $savedDevices.speakers all }
+  if ($savedDevices.microphone) { & $svclPath /SetDefault $savedDevices.microphone all }
+}
 
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay)\.ps1|broadcast\.ps1"? guard' } |

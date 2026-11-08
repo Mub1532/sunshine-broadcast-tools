@@ -1,4 +1,4 @@
-param([string]$applyFrom, [switch]$renewLauncher)
+param([string]$applyFrom, [switch]$renewLauncher, [switch]$repair)
 
 . "$PSScriptRoot\utils.ps1"
 
@@ -396,9 +396,24 @@ if ($renewLauncher) {
   try { Install-Launcher | Out-Null; exit 0 } catch { exit 1 }
 }
 
-if ($applyFrom) {
+function New-RepairRequest {
+  $saved = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+  $repairMode = if ($saved.mode -eq 'casting') { 'casting' } else { 'broadcast' }
+  $sink = ''
+  if ($repairMode -eq 'broadcast') {
+    $csvPath = Join-Path $env:TEMP 'sunshine-broadcast-repair.csv'
+    Start-Process $svclPath "/scomma `"$csvPath`" /Columns `"Name,Type,Direction,Device Name`"" -Wait -WindowStyle Hidden
+    $cableDevice = Import-Csv $csvPath -ErrorAction SilentlyContinue |
+      Where-Object { $_.Type -eq 'Device' -and $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } | Select-Object -First 1
+    Remove-Item $csvPath -ErrorAction SilentlyContinue
+    if ($cableDevice) { $sink = "$($cableDevice.Name) ($($cableDevice.'Device Name'))" }
+  }
+  [pscustomobject]@{ mode = $repairMode; audioSink = $sink; options = $saved.options }
+}
+
+if ($applyFrom -or $repair) {
   try {
-    $request = Get-Content $applyFrom -Raw | ConvertFrom-Json
+    $request = if ($repair) { New-RepairRequest } else { Get-Content $applyFrom -Raw | ConvertFrom-Json }
     $failures = @()
     $steps = [ordered]@{
       'Service'   = { Install-SunshineService; Grant-ServiceControl }
@@ -418,6 +433,7 @@ if ($applyFrom) {
       catch { $failures += "$($step.Key): $($_.Exception.Message)" }
     }
     if ($failures) { throw ($failures -join "`n") }
+    if ($repair) { exit 0 }
 
     if ((Get-Service $serviceName).Status -eq 'Running') {
       Restart-Service $serviceName -Force
@@ -426,7 +442,7 @@ if ($applyFrom) {
     exit 0
   }
   catch {
-    Set-Content "$applyFrom.err" $_.Exception.Message
+    if ($applyFrom) { Set-Content "$applyFrom.err" $_.Exception.Message }
     exit 1
   }
 }
