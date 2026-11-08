@@ -128,12 +128,18 @@ public class OverlayButton : Form {
   public readonly FlatButton Button = new FlatButton();
   readonly ToolTip toolTip = new ToolTip { ShowAlways = true };
 
+  // display scaling (1 = 100%, 1.5 = 150%), so buttons grow with the text on scaled screens
+  public static readonly float Scale = GetScale();
+  static float GetScale() {
+    using (var graphics = Graphics.FromHwnd(IntPtr.Zero)) return Math.Max(1f, graphics.DpiX / 96f);
+  }
+  public static int Scaled(int value) { return (int)Math.Round(value * Scale); }
+
   public OverlayButton(string text, string fontName, float fontSize, Size size) {
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
     StartPosition = FormStartPosition.Manual;
-    Size = size;
 
     Button.Text = text;
     Button.Dock = DockStyle.Fill;
@@ -147,6 +153,13 @@ public class OverlayButton : Form {
     Button.UseCompatibleTextRendering = true;
     Button.Cursor = Cursors.Hand;
     Controls.Add(Button);
+
+    // scaled base size, made bigger if the text still doesnt fit
+    SizeF textSize;
+    using (var graphics = CreateGraphics()) textSize = graphics.MeasureString(text, Button.Font);
+    Size = new Size(
+      Math.Max(Scaled(size.Width), (int)Math.Ceiling(textSize.Width) + Scaled(12)),
+      Math.Max(Scaled(size.Height), (int)Math.Ceiling(textSize.Height) + Scaled(6)));
   }
 
   public void SetLook(Color color, string tip) {
@@ -179,8 +192,8 @@ public class OverlayForm : Form {
   const int ResizeBorder = 10;
   const int CornerSize = ResizeBorder + 6;
   const int MinWidth = 240;
-  const int ButtonInset = 6;
-  const int ButtonGap = 4;
+  static readonly int ButtonInset = OverlayButton.Scaled(6);
+  static readonly int ButtonGap = OverlayButton.Scaled(4);
   const string CameraGlyph = "\uE714";
   const string MicrophoneGlyph = "\uE720";
   static readonly Color Red = Color.FromArgb(185, 45, 45);
