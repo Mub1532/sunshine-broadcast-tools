@@ -16,7 +16,7 @@
   "disconnected": "{device} Disconnected. If this was not on purpose, please go to {device} and connect again.",
   "unknownDevice": "the device",
   "disconnectedVia": "Disconnected via: {reason}",
-  "stoppingLidClosed": "Stopping stream because the laptop lid was closed...",
+  "stoppingLidClosed": "Stopping stream because the laptop was put to sleep...",
   "sleepEnded": "Sunshine stream ended because you put the laptop to sleep.",
 
   "cableMissing": "VB-CABLE is not installed. The microphone will not reach the stream.",

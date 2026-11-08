@@ -62,12 +62,6 @@ try {
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
   $messagesPath = Join-Path $installDir 'messageConfig.json'
-  $oldDisconnectMessages = 'Device Disconnected. If this was not on purpose, please reconnect it.', 'Device Disconnected. If this was not on purpose, please reconnect it (TV upstairs).'
-  $messagesText = Get-Content $messagesPath -Raw -Encoding UTF8
-  foreach ($oldMessage in $oldDisconnectMessages) { $messagesText = $messagesText.Replace("`"$oldMessage`"", "`"{device} Disconnected. If this was not on purpose, please go to {device} and connect again.`"") }
-  $messagesText = $messagesText.Replace('"Starting stream..."', '"Starting stream, please wait..."')
-  $messagesText = $messagesText.Replace('"An update is available. Do you want to update?"', '"An update is available for Sunshine Broadcast Tools. Do you want to update?"')
-  [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
   $defaultMessages = Get-Content (Join-Path $sourceDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })

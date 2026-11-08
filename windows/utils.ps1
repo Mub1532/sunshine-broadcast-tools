@@ -87,6 +87,12 @@ function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
   $label = $form.Controls[0]
   $label.Tag = @{ text = $text.TrimEnd('.'); dots = 3 }
   $fullWidth = [System.Windows.Forms.TextRenderer]::MeasureText($label.Tag.text + '...', $label.Font).Width
+  $neededWidth = $fullWidth + [int](60 * (Get-Scale))
+  if ($form.ClientSize.Width -lt $neededWidth) {
+    $form.ClientSize = New-Object System.Drawing.Size($neededWidth, $form.ClientSize.Height)
+    $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $form.Location = New-Object System.Drawing.Point([int]($screen.Left + ($screen.Width - $form.Width) / 2), [int]($screen.Top + ($screen.Height - $form.Height) / 2))
+  }
   $label.Padding = New-Object System.Windows.Forms.Padding([Math]::Max(0, [int](($label.ClientSize.Width - $fullWidth) / 2)), 0, 0, 0)
   $label.Text = $label.Tag.text + '...'
   $form.Refresh()
