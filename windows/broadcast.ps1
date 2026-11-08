@@ -110,6 +110,34 @@ public static class DefaultOutput {
 }
 '@
 
+    Import-CSharp 'lid-watcher' @'
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+public class LidWatcher : NativeWindow {
+  [DllImport("user32.dll")] static extern IntPtr RegisterPowerSettingNotification(IntPtr window, ref Guid setting, int flags);
+  static readonly Guid LidSwitch = new Guid("BA3E0F4D-B817-4094-A2D1-D56379E6A0F3");
+  public bool Closed;
+
+  public LidWatcher() {
+    CreateHandle(new CreateParams());
+    var setting = LidSwitch;
+    RegisterPowerSettingNotification(Handle, ref setting, 0);
+  }
+
+  protected override void WndProc(ref Message message) {
+    if (message.Msg == 0x218 && message.WParam.ToInt32() == 0x8013) {
+      var setting = (Guid)Marshal.PtrToStructure(message.LParam, typeof(Guid));
+      if (setting == LidSwitch && Marshal.ReadInt32(message.LParam, 20) == 0) Closed = true;
+    }
+    base.WndProc(ref message);
+  }
+}
+'@ @('System.Windows.Forms')
+    $lidWatcher = New-Object LidWatcher
+    $lidClosed = $false
+
     $sunshineLogPath = Join-Path $sunshineConfigDir 'sunshine.log'
     $script:logPosition = if (Test-Path $sunshineLogPath) { (Get-Item $sunshineLogPath).Length } else { 0 }
 
@@ -120,6 +148,12 @@ public static class DefaultOutput {
     $hasWoken = $false
 
     while (-not $stopSignal.WaitOne(1000) -and (Get-Service $serviceName).Status -eq 'Running') {
+      [System.Windows.Forms.Application]::DoEvents()
+      if ($lidWatcher.Closed) {
+        $lidClosed = $true
+        Stop-Stream
+        break
+      }
       $powerEvents = @(Get-Event -SourceIdentifier 'PowerChange' -ErrorAction SilentlyContinue)
       if ($powerEvents) {
         $powerEventTypes = $powerEvents | ForEach-Object { $_.SourceEventArgs.NewEvent.EventType }
@@ -142,7 +176,10 @@ public static class DefaultOutput {
       }
     }
 
-    if ($wentToSleep) {
+    if ($lidClosed) {
+      Start-Hidden 'notice.ps1' '-messageKey sleepEnded'
+    }
+    elseif ($wentToSleep) {
       while (-not $hasWoken) {
         $powerEvent = Wait-Event -SourceIdentifier 'PowerChange' -Timeout 86400
         if (-not $powerEvent) { break }

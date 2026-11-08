@@ -226,7 +226,13 @@ public class OverlayForm : Form {
     microphoneButton.Button.Click += (sender, args) => ToggleMicrophone();
     Shown += (sender, args) => StartPlayer();
     LocationChanged += (sender, args) => PlaceButtons();
-    FormClosed += (sender, args) => { mpvTimer.Stop(); Mpv.Destroy(player); };
+    FormClosing += (sender, args) => Hide();
+    FormClosed += (sender, args) => {
+      mpvTimer.Stop();
+      var closingPlayer = player;
+      player = IntPtr.Zero;
+      System.Threading.ThreadPool.QueueUserWorkItem(state => Mpv.Destroy(closingPlayer));
+    };
     mpvTimer.Tick += (sender, args) => CheckPlayer();
   }
 
@@ -406,3 +412,4 @@ $endButtonTimer.Add_Tick({
 $overlay.Add_Shown({ $endButtonTimer.Start() })
 
 [System.Windows.Forms.Application]::Run($overlay)
+[Environment]::Exit(0)
