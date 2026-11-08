@@ -72,6 +72,9 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
   }
   $modeApp = if ($mode -eq 'casting') { $desktopApp } else { $broadcastApp }
   $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -notin $scriptConfig.appName, $modeApp.name })
+  $otherApps = @($otherApps | ForEach-Object {
+      if ($_.name -eq 'Desktop') { [pscustomobject][ordered]@{ 'name' = 'Desktop'; 'image-path' = 'desktop.png' } } else { $_ }
+    })
   $apps.apps = $otherApps + $modeApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
