@@ -10,6 +10,7 @@ function Update-SunshineConf([string]$audioSink, $options) {
   $wanted = [ordered]@{}
   if ($options.disableInput) { $wanted.keyboard = 'disabled'; $wanted.mouse = 'disabled'; $wanted.controller = 'disabled' }
   if ($options.vigemDriver) { $wanted.gamepad_driver = 'vigembus' }
+  if ($options.disableSteamAudio) { $wanted.install_steam_audio_drivers = 'disabled' }
   $confPath = Join-Path $sunshineConfigDir 'sunshine.conf'
   $keptLines = @()
   if (Test-Path $confPath) {
@@ -26,6 +27,7 @@ function Update-SunshineConf([string]$audioSink, $options) {
     }
   }
   $keptLines += "audio_sink = $audioSink"
+  $keptLines += "virtual_sink = $audioSink"
   foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
@@ -375,7 +377,7 @@ $copyButton.Enabled = [bool]$audioSink
 $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
 
 $optionBoxes = [ordered]@{}
-foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver') {
+foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio') {
   $checked = [bool]$savedConfig.options.$option
   $optionBoxes[$option] = Add-Row (New-Object System.Windows.Forms.CheckBox -Property @{ Text = $scriptConfig."$($option)Option"; Checked = $checked; AutoSize = $true }) 26
 }

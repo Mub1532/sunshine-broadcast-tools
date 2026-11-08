@@ -176,7 +176,7 @@ public class LidWatcher : NativeWindow {
           break
         }
       }
-      if ([DefaultOutput]::GetName() -match 'CABLE Input') {
+      if ([DefaultOutput]::GetName() -match 'CABLE Input|Steam Streaming') {
         Start-Sleep -Milliseconds 500
         Restore-Speakers
       }

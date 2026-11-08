@@ -13,6 +13,7 @@
   "removeOtherAppsOption": "Remove other Sunshine stream applications (Steam, normal desktop etc)",
   "disableInputOption": "Disable controlling of the PC from Moonlight",
   "vigemDriverOption": "Set gamepad driver to ViGEmBus",
+  "disableSteamAudioOption": "Don't install Steam audio drivers (Steam Streaming Speakers)",
   "applyButton": "Save / Apply to Sunshine",
 
   "startShortcut": "Start Sunshine Stream",
