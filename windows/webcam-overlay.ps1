@@ -398,12 +398,14 @@ $overlay.MicrophoneToggled = [Action[bool]]{
   param($microphoneOn)
   & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
 }
-$overlay.Add_EndRequested({
+$requestEnd = {
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
     Start-Hidden 'end-stream.ps1' '-fromOverlay'
     $overlay.Close()
   }
-})
+}
+$overlay.Add_EndRequested($requestEnd)
+$trayIcon = New-EndTrayIcon $requestEnd
 
 $endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
 $endButtonTimer.Add_Tick({
@@ -415,4 +417,5 @@ $endButtonTimer.Add_Tick({
 $overlay.Add_Shown({ $endButtonTimer.Start() })
 
 [System.Windows.Forms.Application]::Run($overlay)
+$trayIcon.Dispose()
 [Environment]::Exit(0)

@@ -97,12 +97,14 @@ $endForm = New-Object EndButtonForm -ArgumentList $scriptConfig.endButton, ([flo
 $endForm.SetBounds($workArea.Left + [int](16 * $scale), $workArea.Bottom - $buttonHeight - [int](24 * $scale), $buttonWidth, $buttonHeight)
 $endForm.Opacity = 0
 
-$endForm.Add_EndRequested({
+$requestEnd = {
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
     Start-Hidden 'end-stream.ps1' '-fromOverlay'
     $endForm.Close()
   }
-})
+}
+$endForm.Add_EndRequested($requestEnd)
+$trayIcon = New-EndTrayIcon $requestEnd
 
 $watchTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
 $watchTimer.Add_Tick({
@@ -116,4 +118,5 @@ $watchTimer.Add_Tick({
 $endForm.Add_Shown({ $watchTimer.Start() })
 
 [System.Windows.Forms.Application]::Run($endForm)
+$trayIcon.Dispose()
 [Environment]::Exit(0)

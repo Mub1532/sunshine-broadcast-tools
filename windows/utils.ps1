@@ -141,6 +141,19 @@ function Show-Choice([string]$message, [string[]]$choices) {
   [int]$form.Tag
 }
 
+function New-EndTrayIcon([scriptblock]$onEnd) {
+  $sunshineExe = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
+  $menu = New-Object System.Windows.Forms.ContextMenuStrip
+  $menu.Items.Add($scriptConfig.endButton).Add_Click($onEnd) | Out-Null
+  $tray = New-Object System.Windows.Forms.NotifyIcon -Property @{
+    Text             = $scriptConfig.title
+    Icon             = if (Test-Path $sunshineExe) { [System.Drawing.Icon]::ExtractAssociatedIcon($sunshineExe) } else { [System.Drawing.SystemIcons]::Application }
+    ContextMenuStrip = $menu
+    Visible          = $true
+  }
+  $tray
+}
+
 function Get-InstalledVersion {
   if (Test-Path $versionPath) { return Get-Content $versionPath -Raw | ConvertFrom-Json }
   [pscustomobject]@{ branch = 'main'; commit = '' }
