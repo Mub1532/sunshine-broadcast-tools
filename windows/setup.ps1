@@ -17,7 +17,7 @@ function Write-Utf8File([string]$path, [string]$content) {
   [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Update-SunshineConf([string]$audioSink, $options) {
+function Update-SunshineConf([string]$mode, [string]$audioSink, $options) {
   $wanted = [ordered]@{}
   if ($options.disableInput) { $wanted.keyboard = 'disabled'; $wanted.mouse = 'disabled'; $wanted.controller = 'disabled' }
   if ($options.vigemDriver) { $wanted.gamepad_driver = 'vigembus' }
@@ -37,14 +37,16 @@ function Update-SunshineConf([string]$audioSink, $options) {
       $keptLines += $line
     }
   }
-  $keptLines += "audio_sink = $audioSink"
-  $keptLines += "virtual_sink = $audioSink"
-  $keptLines += "external_audio = enabled"
+  if ($mode -eq 'broadcast') {
+    $keptLines += "audio_sink = $audioSink"
+    $keptLines += "virtual_sink = $audioSink"
+    $keptLines += "external_audio = enabled"
+  }
   foreach ($setting in $wanted.GetEnumerator()) { $keptLines += "$($setting.Key) = $($setting.Value)" }
   Write-Utf8File $confPath (($keptLines -join "`r`n") + "`r`n")
 }
 
-function Update-SunshineApps([bool]$removeOthers) {
+function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $apps = [pscustomobject]@{ env = [pscustomobject]@{}; apps = @() }
   if (Test-Path $appsPath) {
@@ -62,8 +64,10 @@ function Update-SunshineApps([bool]$removeOthers) {
       })
     'detached'   = @((Get-HiddenCommand 'broadcast.ps1' 'guard'), (Get-HiddenCommand 'webcam-overlay.ps1'))
   }
-  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -ne $scriptConfig.appName })
-  $apps.apps = $otherApps + $broadcastApp
+  $desktopApp = [pscustomobject][ordered]@{ 'name' = 'Desktop'; 'image-path' = 'desktop.png' }
+  $modeApp = if ($mode -eq 'casting') { $desktopApp } else { $broadcastApp }
+  $otherApps = @($apps.apps | Where-Object { -not $removeOthers -and $_.name -notin $scriptConfig.appName, $modeApp.name })
+  $apps.apps = $otherApps + $modeApp
   Write-Utf8File $appsPath (ConvertTo-Json $apps -Depth 6)
 }
 
@@ -283,8 +287,8 @@ if ($applyFrom) {
       'Firewall'  = { Add-FirewallRules }
       'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
       'Ports'     = { Set-SunshinePorts }
-      'Config'    = { Update-SunshineConf $request.audioSink $request.options }
-      'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
+      'Config'    = { Update-SunshineConf $request.mode $request.audioSink $request.options }
+      'Apps'      = { Update-SunshineApps $request.mode ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
         New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
@@ -314,14 +318,13 @@ if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcast
 $restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
 $menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
 if (Test-Path $restoreScript) { $menuChoices += $scriptConfig.undoButton }
-do {
-  $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
-  if ($menuChoice -eq 2) {
-    Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
-    exit
-  }
-  if ($menuChoice -lt 0) { exit }
-} while ($menuChoice -ne 0)
+$menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
+if ($menuChoice -eq 2) {
+  Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+  exit
+}
+if ($menuChoice -lt 0) { exit }
+$mode = if ($menuChoice -eq 1) { 'casting' } else { 'broadcast' }
 
 function Test-CableInstalled {
   [bool](Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object FriendlyName -like '*VB-Audio Virtual Cable*')
@@ -374,7 +377,7 @@ function Install-BroadcastComponents {
   finally { Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-if (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled)) {
+if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled))) {
   if ((Show-Choice $messageConfig.componentsNeeded @($messageConfig.componentsInstall, $messageConfig.componentsCancel)) -ne 0) { exit }
   $progressForm = Show-Progress $messageConfig.componentsInstalling
   $progressForm.TopMost = $false
@@ -391,24 +394,27 @@ if (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-C
   }
 }
 
-$deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
-Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
-$audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
-Remove-Item $deviceCsv -ErrorAction SilentlyContinue
-if (-not $audioDevices) {
-  Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
-  exit 1
+$audioSink = ''
+if ($mode -eq 'broadcast') {
+  $deviceCsv = Join-Path $env:TEMP 'sunshine-broadcast-devices.csv'
+  Start-Process $svclPath "/scomma `"$deviceCsv`" /Columns `"Name,Type,Direction,Device Name,Command-Line Friendly ID`"" -Wait -WindowStyle Hidden
+  $audioDevices = @(Import-Csv $deviceCsv -ErrorAction SilentlyContinue | Where-Object Type -eq 'Device')
+  Remove-Item $deviceCsv -ErrorAction SilentlyContinue
+  if (-not $audioDevices) {
+    Show-Message $messageConfig.devicesUnreadable 'Error' | Out-Null
+    exit 1
+  }
+
+  $physicalDevices = $audioDevices | Where-Object { $_.'Device Name' -notmatch 'VB-Audio' }
+  $speakers = @($physicalDevices | Where-Object Direction -eq 'Render')
+  $microphones = @($physicalDevices | Where-Object Direction -eq 'Capture')
+  $cameras = @(Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
+    Where-Object Class -in 'Camera', 'Image' | Select-Object -ExpandProperty FriendlyName)
+
+  $cable = $audioDevices | Where-Object { $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } |
+    Select-Object -First 1
+  $audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
 }
-
-$physicalDevices = $audioDevices | Where-Object { $_.'Device Name' -notmatch 'VB-Audio' }
-$speakers = @($physicalDevices | Where-Object Direction -eq 'Render')
-$microphones = @($physicalDevices | Where-Object Direction -eq 'Capture')
-$cameras = @(Get-PnpDevice -PresentOnly -Status OK -ErrorAction SilentlyContinue |
-  Where-Object Class -in 'Camera', 'Image' | Select-Object -ExpandProperty FriendlyName)
-
-$cable = $audioDevices | Where-Object { $_.Direction -eq 'Render' -and $_.Name -eq 'CABLE Input' -and $_.'Device Name' -match 'VB-Audio' } |
-  Select-Object -First 1
-$audioSink = if ($cable) { "$($cable.Name) ($($cable.'Device Name'))" } else { '' }
 
 $savedConfig = if (Test-Path $deviceConfigPath) { Get-Content $deviceConfigPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
 $setupPath = $PSCommandPath
@@ -421,7 +427,7 @@ function Get-SavedIndex($devices, [string]$savedId) {
 }
 
 $setupForm = New-Object System.Windows.Forms.Form -Property @{
-  Text            = $scriptConfig.setupTitle
+  Text            = if ($mode -eq 'casting') { $scriptConfig.castingSetupTitle } else { $scriptConfig.setupTitle }
   StartPosition   = 'CenterScreen'
   FormBorderStyle = 'FixedDialog'
   MaximizeBox     = $false
@@ -452,18 +458,23 @@ function Add-DropDown([string[]]$items, [int]$selectedIndex) {
 
 function Get-DeviceLabel($device) { "$($device.Name) ($($device.'Device Name'))" }
 
-Add-Label $scriptConfig.speakersLabel
-$speakerList = Add-DropDown ($speakers | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $speakers $savedConfig.speakers)
-Add-Label $scriptConfig.microphoneLabel
-$microphoneList = Add-DropDown ($microphones | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $microphones $savedConfig.microphone)
-Add-Label $scriptConfig.cameraLabel
-$cameraList = Add-DropDown $cameras ([Math]::Max(0, [Array]::IndexOf($cameras, [string]$savedConfig.camera)))
+if ($mode -eq 'casting') {
+  Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $scriptConfig.castingDescription; Height = 40 }) 48 | Out-Null
+}
+else {
+  Add-Label $scriptConfig.speakersLabel
+  $speakerList = Add-DropDown ($speakers | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $speakers $savedConfig.speakers)
+  Add-Label $scriptConfig.microphoneLabel
+  $microphoneList = Add-DropDown ($microphones | ForEach-Object { Get-DeviceLabel $_ }) (Get-SavedIndex $microphones $savedConfig.microphone)
+  Add-Label $scriptConfig.cameraLabel
+  $cameraList = Add-DropDown $cameras ([Math]::Max(0, [Array]::IndexOf($cameras, [string]$savedConfig.camera)))
 
-Add-Label $scriptConfig.audioSinkLabel
-Add-Row (New-Object System.Windows.Forms.TextBox -Property @{ Text = $audioSink; ReadOnly = $true }) 0 20 370 | Out-Null
-$copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.copyButton }) 44 400 80
-$copyButton.Enabled = [bool]$audioSink
-$copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
+  Add-Label $scriptConfig.audioSinkLabel
+  Add-Row (New-Object System.Windows.Forms.TextBox -Property @{ Text = $audioSink; ReadOnly = $true }) 0 20 370 | Out-Null
+  $copyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.copyButton }) 44 400 80
+  $copyButton.Enabled = [bool]$audioSink
+  $copyButton.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($audioSink) })
+}
 
 $optionBoxes = [ordered]@{}
 foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDriver', 'disableSteamAudio') {
@@ -473,8 +484,8 @@ foreach ($option in 'defaultLogin', 'removeOtherApps', 'disableInput', 'vigemDri
 $script:nextTop += 10
 
 $warnings = @()
-if (-not $cable) { $warnings += $messageConfig.cableMissing }
-if (-not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
+if ($mode -eq 'broadcast' -and -not $cable) { $warnings += $messageConfig.cableMissing }
+if ($mode -eq 'broadcast' -and -not (Test-Path $libmpvPath)) { $warnings += $messageConfig.mpvMissing }
 if ($warnings) {
   Add-Row (New-Object System.Windows.Forms.Label -Property @{ Text = $warnings -join "`n"; ForeColor = 'Firebrick'; Height = 44 }) 50 | Out-Null
 }
@@ -486,12 +497,29 @@ function Get-Options {
 }
 
 function Save-Config {
+  if ($mode -eq 'casting') {
+    try {
+      [ordered]@{
+        mode       = 'casting'
+        speakers   = $savedConfig.speakers
+        microphone = $savedConfig.microphone
+        camera     = $savedConfig.camera
+        options    = Get-Options
+      } | ConvertTo-Json | Set-Content $deviceConfigPath -Encoding UTF8
+      return $true
+    }
+    catch {
+      Show-Message (Format-Text $messageConfig.saveFailed @{ error = $_.Exception.Message }) 'Error' | Out-Null
+      return $false
+    }
+  }
   if ($speakerList.SelectedIndex -lt 0 -or $microphoneList.SelectedIndex -lt 0) {
     Show-Message $messageConfig.selectDevices 'Warning' | Out-Null
     return $false
   }
   try {
     [ordered]@{
+      mode       = 'broadcast'
       speakers   = $speakers[$speakerList.SelectedIndex].'Command-Line Friendly ID'
       microphone = $microphones[$microphoneList.SelectedIndex].'Command-Line Friendly ID'
       camera     = [string]$cameraList.SelectedItem
@@ -510,7 +538,7 @@ function Invoke-Apply {
   $requestPath = Join-Path $env:TEMP 'sunshine-broadcast-apply.json'
   $errorPath = "$requestPath.err"
   Remove-Item $errorPath -ErrorAction SilentlyContinue
-  @{ audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
+  @{ mode = $mode; audioSink = $audioSink; options = Get-Options } | ConvertTo-Json | Set-Content $requestPath
 
   try {
     $applyProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$setupPath`" -applyFrom `"$requestPath`"" `
@@ -532,7 +560,7 @@ function Invoke-Apply {
 
 $applyButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.applyButton; Height = 34 }) 50 300 180
 $applyButton.Add_Click({
-  if ($audioSink) { Invoke-Apply }
+  if ($mode -eq 'casting' -or $audioSink) { Invoke-Apply }
   elseif (Save-Config) { Show-Message "$($messageConfig.saved)`n`n$($scriptConfig.messagesNote)" | Out-Null; $setupForm.Close() }
 })
 
