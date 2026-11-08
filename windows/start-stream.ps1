@@ -44,6 +44,12 @@ if (Test-Path $sunshineConf) {
 }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
+$launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
+if ((Test-Path $launcherPath) -and (Get-AuthenticodeSignature $launcherPath).Status -ne 'Valid') {
+  try { Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -renewLauncher" -Verb RunAs -WindowStyle Hidden }
+  catch {}
+}
+
 $startingSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $startingName)
 $progressForm = Show-Progress $messageConfig.checkingUpdates
 if (-not $skipUpdateCheck) {

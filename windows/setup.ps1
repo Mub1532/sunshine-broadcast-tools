@@ -1,4 +1,4 @@
-param([string]$applyFrom)
+param([string]$applyFrom, [switch]$renewLauncher)
 
 . "$PSScriptRoot\utils.ps1"
 
@@ -125,8 +125,46 @@ static class Launcher {
 </assembly>
 '@
   $iconPath = Join-Path $buildDir 'launcher.ico'
-  $iconStream = [System.IO.File]::Create($iconPath)
-  try { [System.Drawing.Icon]::ExtractAssociatedIcon($sunshineIconPath).Save($iconStream) } finally { $iconStream.Dispose() }
+  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Runtime.InteropServices;
+
+public static class IconBuilder {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  static extern uint PrivateExtractIcons(string file, int index, int width, int height, IntPtr[] icons, uint[] ids, uint count, uint flags);
+  [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+
+  public static void Save(string exePath, string icoPath) {
+    int[] sizes = { 256, 64, 48, 32, 24, 16 };
+    var images = new byte[sizes.Length][];
+    for (int i = 0; i < sizes.Length; i++) {
+      var handles = new IntPtr[1];
+      PrivateExtractIcons(exePath, 0, sizes[i], sizes[i], handles, null, 1, 0);
+      using (var bitmap = Icon.FromHandle(handles[0]).ToBitmap())
+      using (var png = new MemoryStream()) {
+        bitmap.Save(png, ImageFormat.Png);
+        images[i] = png.ToArray();
+      }
+      DestroyIcon(handles[0]);
+    }
+    using (var writer = new BinaryWriter(File.Create(icoPath))) {
+      writer.Write((short)0); writer.Write((short)1); writer.Write((short)sizes.Length);
+      int offset = 6 + 16 * sizes.Length;
+      for (int i = 0; i < sizes.Length; i++) {
+        writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i])); writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));
+        writer.Write((byte)0); writer.Write((byte)0); writer.Write((short)1); writer.Write((short)32);
+        writer.Write(images[i].Length); writer.Write(offset);
+        offset += images[i].Length;
+      }
+      foreach (var image in images) writer.Write(image);
+    }
+  }
+}
+'@
+  [IconBuilder]::Save($sunshineIconPath, $iconPath)
   $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
   $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" $sourcePath 2>&1
   if ($LASTEXITCODE) { throw "Could not build the launcher: $($compilerOutput -join ' ')" }
@@ -169,6 +207,12 @@ function New-DesktopShortcut([string]$name, [string]$script, [string]$tip, [stri
   $shortcut.Description = $tip
   $shortcut.IconLocation = $icon
   $shortcut.Save()
+}
+
+if ($renewLauncher) {
+  Start-Sleep -Seconds 2
+  Remove-Item (Join-Path $appDir 'Sunshine Broadcast Tools.exe') -Force -ErrorAction SilentlyContinue
+  try { Install-Launcher | Out-Null; exit 0 } catch { exit 1 }
 }
 
 if ($applyFrom) {
