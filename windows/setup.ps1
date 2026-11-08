@@ -449,6 +449,15 @@ $applyButton.Add_Click({
 })
 
 $formWidth = [Math]::Max(500, ($optionBoxes.Values | ForEach-Object { $_.Right } | Measure-Object -Maximum).Maximum + 20)
+$restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
+if (Test-Path $restoreScript) {
+  $undoButton = Add-Row (New-Object System.Windows.Forms.Button -Property @{ Text = $scriptConfig.undoButton; Height = 30 }) 44 20 180
+  $undoButton.Add_Click({
+    Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$restoreScript`""
+    $setupForm.Close()
+  })
+}
+
 $setupForm.ClientSize = New-Object System.Drawing.Size($formWidth, $script:nextTop)
 $setupForm.Add_Shown({
   Show-OnTop $setupForm

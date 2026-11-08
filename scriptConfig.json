@@ -15,6 +15,7 @@
   "vigemDriverOption": "Set gamepad driver to ViGEmBus",
   "disableSteamAudioOption": "Don't install Steam audio drivers (Steam Streaming Speakers)",
   "applyButton": "Save / Apply to Sunshine",
+  "undoButton": "Undo last update",
 
   "startShortcut": "Start Sunshine Stream",
   "startShortcutTip": "Start a broadcast stream in Sunshine",
