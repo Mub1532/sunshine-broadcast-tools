@@ -90,12 +90,24 @@ try {
   $libmpvPath = Join-Path $windowsDir 'libmpv-2.dll'
   if (-not (Test-Path $libmpvPath)) {
     Write-Host 'Downloading libmpv...'
-    $release = Invoke-RestMethod $mpvReleaseUrl -UseBasicParsing
-    $asset = $release.assets | Where-Object name -match '^mpv-dev-x86_64-\d{8}-git-.+\.7z$' | Select-Object -First 1
-    if (-not $asset) { throw 'Could not find the latest libmpv download.' }
+    $mpvUrl = $null
+    try {
+      $release = Invoke-RestMethod $mpvReleaseUrl -UseBasicParsing
+      $mpvUrl = ($release.assets | Where-Object name -match '^mpv-dev-x86_64-\d{8}-git-.+\.7z$' | Select-Object -First 1).browser_download_url
+    }
+    catch {}
+    if (-not $mpvUrl) {
+      $latestPage = Invoke-WebRequest 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest' -UseBasicParsing
+      $mpvTag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
+      $assetsPage = Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$mpvTag" -UseBasicParsing
+      if ($assetsPage.Content -match 'href="(/shinchiro/mpv-winbuild-cmake/releases/download/[^"]*/mpv-dev-x86_64-\d{8}-git-[^"/]+\.7z)"') {
+        $mpvUrl = "https://github.com$($Matches[1])"
+      }
+    }
+    if (-not $mpvUrl) { throw 'Could not find the latest libmpv download.' }
     $mpvDir = Join-Path $tempDir 'mpv'
     New-Item $mpvDir -ItemType Directory | Out-Null
-    tar.exe -xf (Get-Download $asset.browser_download_url 'mpv.7z') -C $mpvDir
+    tar.exe -xf (Get-Download $mpvUrl 'mpv.7z') -C $mpvDir
     if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
     Copy-Item (Get-ChildItem $mpvDir -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
   }
@@ -105,6 +117,17 @@ try {
     [ordered]@{ branch = $branch; commit = $commit } | ConvertTo-Json | Set-Content (Join-Path $installDir 'version.json') -Encoding UTF8
   }
   if ($silent) { return }
+
+  if (-not (Test-Path (Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'))) {
+    Write-Host 'Downloading Sunshine...'
+    $windowsArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    $sunshineArch = if ($windowsArch -eq 'ARM64') { 'ARM64' } else { 'AMD64' }
+    $sunshineMsi = "Sunshine-Windows-$sunshineArch-installer.msi"
+    $sunshineInstaller = Get-Download "https://github.com/LizardByte/Sunshine/releases/latest/download/$sunshineMsi" $sunshineMsi
+    Write-Host 'Opening the Sunshine installer...'
+    $sunshineSetup = Start-Process msiexec.exe "/i `"$sunshineInstaller`"" -Wait -PassThru
+    if ($sunshineSetup.ExitCode -notin 0, 3010) { throw "Sunshine install failed (code $($sunshineSetup.ExitCode))." }
+  }
 
   if (-not (Test-CableInstalled)) {
     Write-Host 'Downloading VB-CABLE...'
