@@ -182,6 +182,15 @@ function Start-TrayIcon {
   else { Start-Hidden 'end-button.ps1' }
 }
 
+function Test-UserServiceAccess {
+  $securityDescriptor = (sc.exe sdshow $serviceName) -join ''
+  foreach ($ace in [regex]::Matches($securityDescriptor, '\(A;;([A-Z]+);;;IU\)')) {
+    $rights = $ace.Groups[1].Value
+    if ($rights.Contains('RP') -and $rights.Contains('WP') -and $rights.Contains('LC')) { return $true }
+  }
+  $false
+}
+
 function Get-InstalledVersion {
   if (Test-Path $versionPath) { return Get-Content $versionPath -Raw | ConvertFrom-Json }
   [pscustomobject]@{ branch = 'main'; commit = '' }

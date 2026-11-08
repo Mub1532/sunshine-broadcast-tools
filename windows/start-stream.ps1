@@ -81,7 +81,7 @@ if (-not $skipUpdateCheck) {
 function Test-SetupNeedsRepair {
   if (-not (Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue)) { return $true }
   if ((Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartMode -ne 'Manual') { return $true }
-  if (-not ((sc.exe sdshow $serviceName) -join '').Contains('(A;;RPWPLC;;;IU)')) { return $true }
+  if (-not (Test-UserServiceAccess)) { return $true }
   if (-not (Test-Path $runnerPath)) { return $true }
   $appsPath = Join-Path $sunshineConfigDir 'apps.json'
   $modeApp = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }

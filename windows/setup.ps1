@@ -179,9 +179,9 @@ function Set-DefaultCredentials {
 
 function Grant-ServiceControl {
   $securityDescriptor = (sc.exe sdshow $serviceName | Where-Object { $_ }) -join ''
-  $userAccess = '(A;;RPWPLC;;;IU)'
-  if ($securityDescriptor -and -not $securityDescriptor.Contains($userAccess)) {
-    sc.exe sdset $serviceName ($securityDescriptor -replace '^D:', "D:$userAccess") | Out-Null
+  $cleaned = $securityDescriptor -replace '\(A;;(RPWPLC|LCRPWP);;;IU\)', ''
+  if (-not (Test-UserServiceAccess) -or $cleaned -ne $securityDescriptor) {
+    sc.exe sdset $serviceName ($cleaned -replace '^D:', 'D:(A;;RPWPLC;;;IU)') | Out-Null
   }
   sc.exe config $serviceName start= demand | Out-Null
 }
