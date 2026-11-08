@@ -482,7 +482,9 @@ if ($applyFrom -or $repair) {
         if ($runnerProblem) { throw $runnerProblem }
       }
       'Shortcuts' = {
-        New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0"
+        # with run as admin unticked the start shortcut opens without admin, and only asks for admin when something needs fixing
+        if ($request.options.runAsAdmin -ne $false) { New-LauncherShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0" }
+        else { New-DesktopShortcut $scriptConfig.startShortcut 'start-stream.ps1' $scriptConfig.startShortcutTip "$sunshineIconPath,0" }
         $startupFolder = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
         New-DesktopShortcut 'Sunshine Broadcast Cleanup' 'broadcast.ps1' 'Restore audio if a stream was left running' "$env:windir\System32\shell32.dll,27" $startupFolder 'cleanup'
       }

@@ -43,6 +43,7 @@ if (Test-Path $sunshineConf) {
   if ($portLine) { $sunshinePort = [int]$portLine.Matches[0].Groups[1].Value }
 }
 $savedConfig = Get-Content $deviceConfigPath -Raw | ConvertFrom-Json
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $isCasting = $savedConfig.mode -eq 'casting'
 $appName = if ($isCasting) { 'Desktop' } else { $scriptConfig.appName }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $appName }
@@ -93,8 +94,13 @@ function Test-SetupNeedsRepair {
 
 if ((Test-Path $deviceConfigPath) -and (Test-SetupNeedsRepair)) {
   Set-ProgressText $progressForm $messageConfig.repairing
-  $repairProcess = Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -repair" -WindowStyle Hidden -PassThru
-  Wait-Until { $repairProcess.HasExited } 120 | Out-Null
+  $repairArgs = @{ FilePath = 'powershell'; ArgumentList = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir 'setup.ps1')`" -repair"; WindowStyle = 'Hidden'; PassThru = $true }
+  if (-not $isAdmin) { $repairArgs.Verb = 'RunAs' }
+  try {
+    $repairProcess = Start-Process @repairArgs
+    Wait-Until { $repairProcess.HasExited } 120 | Out-Null
+  }
+  catch {}
 }
 
 Set-ProgressText $progressForm $messageConfig.starting
@@ -114,7 +120,8 @@ Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -Err
 
 & (Join-Path $appDir 'broadcast.ps1') start
 if (-not $isCasting) { Start-Hidden 'webcam-overlay.ps1' }
-Start-TrayIcon
+# the launcher always asks for admin, so without admin use the plain tray button instead
+if ($isAdmin) { Start-TrayIcon } else { Start-Hidden 'end-button.ps1' }
 
 if (-not (Test-SunshineReady)) {
   Start-Process sc.exe "start $serviceName" -WindowStyle Hidden -Wait
