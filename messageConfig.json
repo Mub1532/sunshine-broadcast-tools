@@ -6,7 +6,7 @@
   "updateSkip": "Not now",
   "updating": "Updating...",
   "updateFailed": "The update didn't work. The stream will start with the current version.",
-  "starting": "Starting stream...",
+  "starting": "Starting stream, please wait...",
   "ready": "Stream is running.\n\nOn the viewing device, open Moonlight, select \"{host}\" and then \"{app}\".",
   "sunshineMissing": "Sunshine is not installed on this computer.",
   "startFailed": "Stream could not be started.\n\nCheck that the Sunshine service is installed and that users are allowed to start it.",
