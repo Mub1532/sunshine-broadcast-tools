@@ -29,6 +29,7 @@ $versionPath = Join-Path $repoDir 'version.json'
 $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
 $launcherVersion = '2.0.1.0'
 $runnerPath = Join-Path $appDir 'run-hidden.exe'
+$runnerVersion = '2.0.0.0'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -210,6 +211,11 @@ function Get-LatestCommit([string]$branch) {
 
 function Get-HiddenCommand([string]$script, [string]$arguments = '') {
   "conhost.exe --headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir $script)`" $arguments".TrimEnd()
+}
+
+# start command for sunshine. if run-hidden fails (not a refusal) it falls back to the old hidden powershell way so the stream still starts
+function Get-StartCommand {
+  "cmd.exe /c `"`"$runnerPath`" broadcast.ps1 start || if not errorlevel 10 $(Get-HiddenCommand 'broadcast.ps1' 'start')`""
 }
 
 function Start-Hidden([string]$script, [string]$arguments = '') {

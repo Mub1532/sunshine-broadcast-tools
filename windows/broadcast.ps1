@@ -49,7 +49,7 @@ switch ($action) {
     Set-Content $clientNamePath ([string]$env:SUNSHINE_CLIENT_NAME) -Encoding UTF8
     if (-not $isCasting -and $env:SUNSHINE_CLIENT_HOST_AUDIO -eq 'false') {
       Start-Hidden 'notice.ps1' '-messageKey hostAudioOff'
-      exit 1
+      exit 10
     }
     if (-not $isCasting) {
       & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId

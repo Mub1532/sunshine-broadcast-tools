@@ -58,7 +58,7 @@ function Update-SunshineApps([string]$mode, [bool]$removeOthers) {
     'name'       = $scriptConfig.appName
     'image-path' = Join-Path $repoDir 'images\desktop-broadcast.png'
     'prep-cmd'   = @([pscustomobject][ordered]@{
-        do       = "`"$runnerPath`" broadcast.ps1 start"
+        do       = Get-StartCommand
         undo     = Get-HiddenCommand 'broadcast.ps1' 'release'
         elevated = $false
       })
@@ -87,18 +87,50 @@ function Install-Runner {
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 
+[assembly: AssemblyFileVersion("2.0.0.0")]
+
+// runs our scripts hidden for sunshine. only a refusal (exit 10) stops the stream, anything else that goes wrong gets written to the debug log and the stream carries on
 static class Runner {
+  const int RefuseCode = 10;
+
+  static void Log(string text) {
+    try {
+      string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sunshine Broadcast Tools");
+      Directory.CreateDirectory(folder);
+      string logPath = Path.Combine(folder, "debug.log");
+      if (File.Exists(logPath) && new FileInfo(logPath).Length > 1000000) File.Delete(logPath);
+      File.AppendAllText(logPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + text.Trim() + Environment.NewLine);
+    }
+    catch { }
+  }
+
   static int Main(string[] args) {
-    if (args.Length == 0) return 1;
-    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
-    string extra = string.Join(" ", args, 1, args.Length - 1);
-    var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
-      UseShellExecute = false,
-      CreateNoWindow = true
-    });
-    process.WaitForExit();
-    return process.ExitCode;
+    string command = string.Join(" ", args);
+    try {
+      if (args.Length == 0) return 0;
+      string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, args[0]);
+      string extra = string.Join(" ", args, 1, args.Length - 1);
+      var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" " + extra) {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+      });
+      var output = process.StandardOutput.ReadToEndAsync();
+      string errors = process.StandardError.ReadToEnd();
+      process.WaitForExit();
+      int code = process.ExitCode;
+      if (code == RefuseCode) { Log(command + ": refused the device"); return RefuseCode; }
+      if (code != 0 || errors.Trim().Length > 0) Log(command + ": exit code " + code + Environment.NewLine + errors + output.Result);
+      else Log(command + ": ok");
+      return 0;
+    }
+    catch (Exception error) {
+      Log(command + ": crashed" + Environment.NewLine + error);
+      return 0;
+    }
   }
 }
 '@
