@@ -27,7 +27,7 @@ $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
 $versionPath = Join-Path $repoDir 'version.json'
 $launcherPath = Join-Path $appDir 'Sunshine Broadcast Tools.exe'
-$launcherVersion = '2.0.0.0'
+$launcherVersion = '2.0.1.0'
 
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
@@ -144,13 +144,11 @@ function Show-Choice([string]$message, [string[]]$choices) {
 }
 
 function New-RecordIcon {
-  $iconFont = if ((New-Object System.Drawing.Text.InstalledFontCollection).Families.Name -contains 'Segoe Fluent Icons') { 'Segoe Fluent Icons' } else { 'Segoe MDL2 Assets' }
   $bitmap = New-Object System.Drawing.Bitmap 32, 32
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-  $graphics.TextRenderingHint = 'AntiAliasGridFit'
-  $font = New-Object System.Drawing.Font($iconFont, 20, [System.Drawing.GraphicsUnit]::Pixel)
-  $format = New-Object System.Drawing.StringFormat -Property @{ Alignment = 'Center'; LineAlignment = 'Center' }
-  $graphics.DrawString([string][char]0xE7C8, $font, [System.Drawing.Brushes]::Red, (New-Object System.Drawing.RectangleF(0, 0, 32, 32)), $format)
+  $graphics.SmoothingMode = 'AntiAlias'
+  $graphics.FillEllipse([System.Drawing.Brushes]::White, 3, 3, 26, 26)
+  $graphics.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 40, 40))), 6, 6, 20, 20)
   $graphics.Dispose()
   [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
 }

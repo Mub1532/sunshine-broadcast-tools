@@ -169,7 +169,6 @@ function Install-Launcher {
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Text;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
@@ -178,7 +177,7 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Sunshine Broadcast Tools")]
 [assembly: AssemblyProduct("Sunshine Broadcast Tools")]
 [assembly: AssemblyCompany("Mubashar Khan")]
-[assembly: AssemblyFileVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.1.0")]
 
 static class Launcher {
   [STAThread]
@@ -257,16 +256,11 @@ static class Launcher {
   }
 
   static Icon RecordIcon() {
-    string font = "Segoe MDL2 Assets";
-    foreach (var family in new InstalledFontCollection().Families) {
-      if (family.Name == "Segoe Fluent Icons") font = family.Name;
-    }
     var bitmap = new Bitmap(32, 32);
-    using (var graphics = Graphics.FromImage(bitmap))
-    using (var glyph = new Font(font, 20, GraphicsUnit.Pixel))
-    using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) {
-      graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-      graphics.DrawString("", glyph, Brushes.Red, new RectangleF(0, 0, 32, 32), format);
+    using (var graphics = Graphics.FromImage(bitmap)) {
+      graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+      graphics.FillEllipse(Brushes.White, 3, 3, 26, 26);
+      using (var red = new SolidBrush(Color.FromArgb(220, 40, 40))) graphics.FillEllipse(red, 6, 6, 20, 20);
     }
     return Icon.FromHandle(bitmap.GetHicon());
   }
