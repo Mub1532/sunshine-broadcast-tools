@@ -110,9 +110,9 @@ function Show-Choice([string]$message, [string[]]$choices) {
   $form = New-ScaledForm
   $form.ShowInTaskbar = $true
 
-  $label = New-Object System.Windows.Forms.Label -Property @{ Text = $message; AutoSize = $true; MaximumSize = New-Object System.Drawing.Size([int](440 * $scale), 0) }
+  $textSize = [System.Windows.Forms.TextRenderer]::MeasureText($message, $form.Font, (New-Object System.Drawing.Size([int](440 * $scale), 0)), 'WordBreak')
+  $label = New-Object System.Windows.Forms.Label -Property @{ Text = $message; TextAlign = 'MiddleCenter' }
   $form.Controls.Add($label)
-  $label.Location = New-Object System.Drawing.Point($pad, $pad)
 
   $buttons = @()
   for ($index = 0; $index -lt $choices.Count; $index++) {
@@ -122,11 +122,9 @@ function Show-Choice([string]$message, [string[]]$choices) {
     $buttons += $button
   }
   $widestButton = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Maximum).Maximum
-  $contentWidth = [Math]::Max($label.Width, $widestButton * $buttons.Count + $gap * ($buttons.Count - 1))
+  $contentWidth = [Math]::Max($textSize.Width, $widestButton * $buttons.Count + $gap * ($buttons.Count - 1))
   $buttonWidth = [int](($contentWidth - $gap * ($buttons.Count - 1)) / $buttons.Count)
-  $label.AutoSize = $false
-  $label.TextAlign = 'MiddleCenter'
-  $label.Size = New-Object System.Drawing.Size($contentWidth, $label.Height)
+  $label.SetBounds($pad, $pad, $contentWidth, $textSize.Height + [int](4 * $scale))
   $buttonTop = $label.Bottom + [int](20 * $scale)
   $left = $pad
   foreach ($button in $buttons) {
