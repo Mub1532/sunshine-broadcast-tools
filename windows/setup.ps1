@@ -124,9 +124,12 @@ static class Launcher {
   </trustInfo>
 </assembly>
 '@
+  $iconPath = Join-Path $buildDir 'launcher.ico'
+  $iconStream = [System.IO.File]::Create($iconPath)
+  try { [System.Drawing.Icon]::ExtractAssociatedIcon($sunshineIconPath).Save($iconStream) } finally { $iconStream.Dispose() }
   $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-  & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$sunshineIconPath" $sourcePath | Out-Null
-  if ($LASTEXITCODE) { throw 'Could not build the launcher.' }
+  $compilerOutput = & $compiler /nologo /target:winexe "/out:$launcherPath" "/win32manifest:$manifestPath" "/win32icon:$iconPath" $sourcePath 2>&1
+  if ($LASTEXITCODE) { throw "Could not build the launcher: $($compilerOutput -join ' ')" }
 
   foreach ($store in 'Root', 'TrustedPublisher') {
     Get-ChildItem "Cert:\LocalMachine\$store" | Where-Object Subject -eq 'CN=Mubashar Khan' | Remove-Item
