@@ -58,7 +58,8 @@ if (-not $skipUpdateCheck) {
     if ($choice -eq 0) {
       Set-ProgressText $progressForm $messageConfig.updating
       try {
-        $updateProcess = Start-Process powershell $updateArgs -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP -Wait -PassThru
+        $updateProcess = Start-Process powershell $updateArgs -Verb RunAs -WindowStyle Hidden -WorkingDirectory $env:TEMP -PassThru
+        Wait-Until { $updateProcess.HasExited } 600 | Out-Null
         if ($updateProcess.ExitCode -eq 0) {
           $progressForm.Close()
           Start-Hidden 'start-stream.ps1' '-skipUpdateCheck'
