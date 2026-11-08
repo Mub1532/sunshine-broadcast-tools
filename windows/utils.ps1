@@ -17,6 +17,7 @@ $stopEventName = 'Local\SunshineBroadcastStop'
 $sessionLockName = 'Local\SunshineBroadcastSession'
 $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
 $overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
+$startingName = 'Local\SunshineBroadcastStarting'
 $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
 $versionPath = Join-Path $repoDir 'version.json'
@@ -66,7 +67,7 @@ function Show-Progress([string]$text) {
   $form = New-ScaledForm
   $form.ControlBox = $false
   $form.ClientSize = New-Object System.Drawing.Size([int](340 * $scale), [int](90 * $scale))
-  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Dock = 'Fill'; TextAlign = 'MiddleCenter'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
+  $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Dock = 'Fill'; TextAlign = 'MiddleLeft'; Font = New-Object System.Drawing.Font('Segoe UI', 11) }))
   $dotTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 400 }
   $dotTimer.Add_Tick({
     $label = $form.Controls[0]
@@ -85,7 +86,9 @@ function Show-Progress([string]$text) {
 function Set-ProgressText([System.Windows.Forms.Form]$form, [string]$text) {
   $label = $form.Controls[0]
   $label.Tag = @{ text = $text.TrimEnd('.'); dots = 3 }
-  $label.Text = $text
+  $fullWidth = [System.Windows.Forms.TextRenderer]::MeasureText($label.Tag.text + '...', $label.Font).Width
+  $label.Padding = New-Object System.Windows.Forms.Padding([Math]::Max(0, [int](($label.ClientSize.Width - $fullWidth) / 2)), 0, 0, 0)
+  $label.Text = $label.Tag.text + '...'
   $form.Refresh()
 }
 

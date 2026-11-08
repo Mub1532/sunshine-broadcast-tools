@@ -44,6 +44,7 @@ if (Test-Path $sunshineConf) {
 }
 $readyMessage = Format-Text $messageConfig.ready @{ host = $hostName; app = $scriptConfig.appName }
 
+$startingSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $startingName)
 $progressForm = Show-Progress $messageConfig.checkingUpdates
 if (-not $skipUpdateCheck) {
   $installed = Get-InstalledVersion
@@ -92,4 +93,5 @@ Start-Hidden 'broadcast.ps1' 'guard -session'
 Wait-Until { Test-OverlayReady } 20 | Out-Null
 
 $progressForm.Close()
+$startingSignal.Dispose()
 Show-Message $readyMessage | Out-Null

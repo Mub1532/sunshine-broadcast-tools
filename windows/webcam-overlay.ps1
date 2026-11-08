@@ -240,8 +240,13 @@ public class OverlayForm : Form {
     microphoneButton.SetLook(microphoneOn ? Grey : Red, microphoneOn ? tips[2] : tips[3]);
   }
 
-  void StartPlayer() {
+  public void ShowEndButton() {
+    if (endButton.Visible) return;
     endButton.Show(this);
+    PlaceButtons();
+  }
+
+  void StartPlayer() {
     cameraButton.Show(this);
     microphoneButton.Show(this);
     PlaceButtons();
@@ -390,5 +395,14 @@ $overlay.MicrophoneToggled = [Action[bool]]{
 $overlay.Add_EndRequested({
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') { Stop-Stream }
 })
+
+$endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
+$endButtonTimer.Add_Tick({
+  $startingSignal = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($startingName, [ref]$startingSignal)) { $startingSignal.Dispose(); return }
+  $endButtonTimer.Stop()
+  $overlay.ShowEndButton()
+})
+$overlay.Add_Shown({ $endButtonTimer.Start() })
 
 [System.Windows.Forms.Application]::Run($overlay)
