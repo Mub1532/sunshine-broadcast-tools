@@ -16,6 +16,9 @@
   "disableSteamAudioOption": "Don't install Steam audio drivers (Steam Streaming Speakers)",
   "applyButton": "Save / Apply to Sunshine",
   "undoButton": "Undo last update",
+  "setupMenuText": "What do you want to do?",
+  "broadcastSetupButton": "Setup for broadcast (camera, mic etc)",
+  "castingSetupButton": "Setup for casting",
 
   "startShortcut": "Start Sunshine Stream",
   "startShortcutTip": "Start a broadcast stream in Sunshine",

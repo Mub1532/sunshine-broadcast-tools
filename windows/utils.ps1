@@ -121,13 +121,19 @@ function Show-Choice([string]$message, [string[]]$choices) {
     $form.Controls.Add($button)
     $buttons += $button
   }
-  $rowWidth = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Sum).Sum + $gap * ($buttons.Count - 1)
-  $contentWidth = [Math]::Max($label.Width, $rowWidth)
+  $widestButton = ($buttons | ForEach-Object { $_.Width } | Measure-Object -Maximum).Maximum
+  $contentWidth = [Math]::Max($label.Width, $widestButton * $buttons.Count + $gap * ($buttons.Count - 1))
+  $buttonWidth = [int](($contentWidth - $gap * ($buttons.Count - 1)) / $buttons.Count)
+  $label.AutoSize = $false
+  $label.TextAlign = 'MiddleCenter'
+  $label.Size = New-Object System.Drawing.Size($contentWidth, $label.Height)
   $buttonTop = $label.Bottom + [int](20 * $scale)
-  $left = $pad + $contentWidth - $rowWidth
+  $left = $pad
   foreach ($button in $buttons) {
+    $button.AutoSize = $false
+    $button.Size = New-Object System.Drawing.Size($buttonWidth, $buttons[0].Height)
     $button.Location = New-Object System.Drawing.Point($left, $buttonTop)
-    $left += $button.Width + $gap
+    $left += $buttonWidth + $gap
   }
   $form.ClientSize = New-Object System.Drawing.Size(($contentWidth + $pad * 2), ($buttonTop + $buttons[0].Height + $pad))
   $form.AcceptButton = $buttons[0]
