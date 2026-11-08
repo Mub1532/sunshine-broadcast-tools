@@ -10,9 +10,14 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
+public class FlatEndButton : Button {
+  public FlatEndButton() { SetStyle(ControlStyles.Selectable, false); }
+  protected override bool ShowFocusCues { get { return false; } }
+}
+
 public class EndButtonForm : Form {
-  const int Edge = 5;
-  readonly Button button;
+  const int Edge = 4;
+  readonly FlatEndButton button;
   Point dragStart;
   bool dragging;
   bool moved;
@@ -25,9 +30,9 @@ public class EndButtonForm : Form {
     StartPosition = FormStartPosition.Manual;
     BackColor = Color.FromArgb(185, 45, 45);
     Padding = new Padding(Edge);
-    MinimumSize = new Size(90, 36);
+    MinimumSize = new Size(70, 26);
 
-    button = new Button {
+    button = new FlatEndButton {
       Text = label,
       Dock = DockStyle.Fill,
       FlatStyle = FlatStyle.Flat,
@@ -37,6 +42,7 @@ public class EndButtonForm : Form {
       Cursor = Cursors.SizeAll
     };
     button.FlatAppearance.BorderSize = 0;
+    button.FlatAppearance.BorderColor = Color.FromArgb(185, 45, 45);
     button.FlatAppearance.MouseOverBackColor = Color.FromArgb(205, 70, 70);
     button.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 35, 35);
     button.MouseDown += (sender, args) => { if (args.Button == MouseButtons.Left) { dragging = true; moved = false; dragStart = args.Location; } };
@@ -84,10 +90,10 @@ public class EndButtonForm : Form {
 $closeSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $overlayCloseName)
 
 $scale = Get-Scale
-$buttonWidth = [int](120 * $scale)
-$buttonHeight = [int](36 * $scale)
+$buttonWidth = [int](100 * $scale)
+$buttonHeight = [int](30 * $scale)
 $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$endForm = New-Object EndButtonForm -ArgumentList $scriptConfig.endButton, ([float]10)
+$endForm = New-Object EndButtonForm -ArgumentList $scriptConfig.endButton, ([float]9)
 $endForm.SetBounds($workArea.Left + [int](16 * $scale), $workArea.Bottom - $buttonHeight - [int](24 * $scale), $buttonWidth, $buttonHeight)
 $endForm.Opacity = 0
 
