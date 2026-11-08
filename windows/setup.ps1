@@ -60,6 +60,51 @@ function Install-SunshineService {
   if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) { throw 'The Sunshine service is missing. Reinstall Sunshine as administrator.' }
 }
 
+function Get-ExcludedPortRanges([string]$protocol) {
+  foreach ($line in (netsh int ipv4 show excludedportrange protocol=$protocol)) {
+    if ($line -match '^\s*(\d+)\s+(\d+)\s*(\*)?\s*$') {
+      [pscustomobject]@{ Start = [int]$Matches[1]; End = [int]$Matches[2]; Ours = [bool]$Matches[3] }
+    }
+  }
+}
+
+function Test-PortsFree([int]$basePort) {
+  $first = $basePort - 5
+  $last = $basePort + 21
+  foreach ($protocol in 'tcp', 'udp') {
+    foreach ($range in (Get-ExcludedPortRanges $protocol)) {
+      if ($range.Ours -and $range.Start -eq $first -and $range.End -eq $last) { continue }
+      if ($range.Start -le $last -and $range.End -ge $first) { return $false }
+    }
+  }
+  $listening = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalPort -ge $first -and $_.LocalPort -le $last -and $_.OwningProcess -notin @(Get-Process sunshine -ErrorAction SilentlyContinue).Id }
+  -not $listening
+}
+
+function Set-SunshinePorts {
+  $confPath = Join-Path $sunshineConfigDir 'sunshine.conf'
+  $basePort = 47989
+  if (Test-Path $confPath) {
+    $portLine = Select-String -Path $confPath -Pattern '^\s*port\s*=\s*(\d+)' | Select-Object -Last 1
+    if ($portLine) { $basePort = [int]$portLine.Matches[0].Groups[1].Value }
+  }
+  if (Test-PortsFree $basePort) { return }
+
+  $newPort = 48089..48989 | Where-Object { $_ % 100 -eq 89 } | Where-Object { Test-PortsFree $_ } | Select-Object -First 1
+  if (-not $newPort) { throw 'No free ports found for Sunshine.' }
+  $lines = @(if (Test-Path $confPath) { Get-Content $confPath | Where-Object { $_ -notmatch '^\s*port\s*=' } })
+  Write-Utf8File $confPath ((($lines + "port = $newPort") -join "`r`n") + "`r`n")
+
+  net stop winnat 2>&1 | Out-Null
+  try {
+    foreach ($protocol in 'tcp', 'udp') {
+      netsh int ipv4 add excludedportrange protocol=$protocol startport=$($newPort - 5) numberofports=27 store=persistent | Out-Null
+    }
+  }
+  finally { net start winnat 2>&1 | Out-Null }
+}
+
 function Add-FirewallRules {
   $sunshinePath = Join-Path $env:ProgramFiles 'Sunshine\sunshine.exe'
   Get-NetFirewallRule -DisplayName 'Sunshine Broadcast' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
@@ -223,6 +268,7 @@ if ($applyFrom) {
       'Service'   = { Install-SunshineService; Grant-ServiceControl }
       'Firewall'  = { Add-FirewallRules }
       'Login'     = { if ($request.options.defaultLogin) { Set-DefaultCredentials } }
+      'Ports'     = { Set-SunshinePorts }
       'Config'    = { Update-SunshineConf $request.audioSink $request.options }
       'Apps'      = { Update-SunshineApps ([bool]$request.options.removeOtherApps) }
       'Shortcuts' = {
