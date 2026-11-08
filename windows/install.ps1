@@ -7,6 +7,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
 
+$closeWindow = $false
 $repoName = 'sunshine-broadcast-tools'
 $branch = 'main'
 $silent = [bool]$sbtSilent
@@ -120,7 +121,7 @@ try {
   Write-Host 'Opening Setup...'
   $setupShown = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', 'Local\SunshineBroadcastSetupShown')
   Start-Process conhost.exe "--headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$windowsDir\setup.ps1`""
-  [void]$setupShown.WaitOne(60000)
+  $closeWindow = $setupShown.WaitOne(60000)
   $setupShown.Dispose()
 }
 catch {
@@ -130,3 +131,5 @@ catch {
 finally {
   Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+if ($closeWindow) { [Environment]::Exit(0) }
