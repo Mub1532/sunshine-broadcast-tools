@@ -129,11 +129,11 @@ public class OverlayButton : Form {
   readonly ToolTip toolTip = new ToolTip { ShowAlways = true };
 
   // display scaling (1 = 100%, 1.5 = 150%), so buttons grow with the text on scaled screens
-  public static readonly float Scale = GetScale();
-  static float GetScale() {
+  public static readonly float DisplayScale = GetDisplayScale();
+  static float GetDisplayScale() {
     using (var graphics = Graphics.FromHwnd(IntPtr.Zero)) return Math.Max(1f, graphics.DpiX / 96f);
   }
-  public static int Scaled(int value) { return (int)Math.Round(value * Scale); }
+  public static int Scaled(int value) { return (int)Math.Round(value * DisplayScale); }
 
   public OverlayButton(string text, string fontName, float fontSize, Size size) {
     FormBorderStyle = FormBorderStyle.None;
