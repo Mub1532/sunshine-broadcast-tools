@@ -146,11 +146,36 @@ static class Runner {
 function Install-WorkingRunner {
   Install-Runner
   if (Test-Runner) { return }
+  $testStarted = Get-Date
+  $logLength = if (Test-Path $debugLogPath) { (Get-Item $debugLogPath).Length } else { 0 }
   Install-Runner
   if (Test-Runner) { return }
-  $logPath = Join-Path $env:LOCALAPPDATA 'Sunshine Broadcast Tools\debug.log'
-  $reason = if (Test-Path $logPath) { (Get-Content $logPath -Tail 6) -join "`n" } else { 'run-hidden.exe did not start at all (maybe blocked by antivirus)' }
-  "run-hidden.exe doesn't work on this laptop, streams will start with the old hidden method instead.`n$reason"
+  # the real reason: what windows said, what run-hidden logged during the test, and anything windows security recorded about it
+  $reason = @($script:runnerTestDetail)
+  if ((Test-Path $debugLogPath) -and (Get-Item $debugLogPath).Length -gt $logLength) {
+    $logText = Get-Content $debugLogPath -Raw
+    $reason += 'run-hidden logged: ' + $logText.Substring([Math]::Min($logLength, $logText.Length)).Trim()
+  }
+  $reason += Get-RunnerEvents $testStarted
+  "run-hidden.exe doesn't work on this laptop, streams will start with the old hidden method instead.`n$($reason -join "`n")"
+}
+
+# windows event log entries about run-hidden or powershell being blocked or crashing since the test started
+function Get-RunnerEvents([datetime]$since) {
+  $entries = @()
+  foreach ($logName in 'Application', 'Microsoft-Windows-CodeIntegrity/Operational', 'Microsoft-Windows-Windows Defender/Operational', 'Microsoft-Windows-AppLocker/EXE and DLL') {
+    try {
+      $entries += Get-WinEvent -FilterHashtable @{ LogName = $logName; StartTime = $since } -MaxEvents 200 -ErrorAction Stop |
+        Where-Object { $_.Message -match 'run-hidden|powershell' } | Select-Object -First 3 |
+        ForEach-Object {
+          $text = ($_.Message -replace '\s+', ' ').Trim()
+          "windows event ($logName, id $($_.Id)): $($text.Substring(0, [Math]::Min(500, $text.Length)))"
+        }
+    }
+    catch {}
+  }
+  if (-not $entries) { $entries = @('windows event logs: nothing recorded about run-hidden or powershell during the test') }
+  $entries
 }
 
 function Install-SunshineService {

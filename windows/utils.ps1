@@ -233,15 +233,24 @@ function Get-HiddenCommand([string]$script, [string]$arguments = '') {
   "conhost.exe --headless powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $appDir $script)`" $arguments".TrimEnd()
 }
 
-# runs run-hidden the same way sunshine does and checks our script actually ran
+# runs run-hidden the same way sunshine does and checks our script actually ran. when it fails, $runnerTestDetail says what actually happened
 function Test-Runner {
+  $script:runnerTestDetail = ''
   $markerPath = Join-Path $env:TEMP 'sunshine-broadcast-selftest.txt'
   Remove-Item $markerPath -ErrorAction SilentlyContinue
   try {
-    $testProcess = Start-Process $runnerPath 'broadcast.ps1 selftest' -PassThru
-    if (-not $testProcess.WaitForExit(30000)) { Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue }
+    $testProcess = Start-Process $runnerPath 'broadcast.ps1 selftest' -PassThru -ErrorAction Stop
+    $null = $testProcess.Handle
+    if (-not $testProcess.WaitForExit(30000)) {
+      Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue
+      $script:runnerTestDetail = 'run-hidden.exe started but did not finish within 30 seconds'
+    }
+    elseif (-not (Test-Path $markerPath)) { $script:runnerTestDetail = "run-hidden.exe ran (exit code $($testProcess.ExitCode)) but the test script did not run" }
   }
-  catch { return $false }
+  catch {
+    $script:runnerTestDetail = "Windows could not start run-hidden.exe: $($_.Exception.Message)"
+    return $false
+  }
   Test-Path $markerPath
 }
 
