@@ -359,6 +359,8 @@ if ($problem) {
   exit 1
 }
 Write-MixLog "started ($([AudioMixer]::Details)), laptop sound $($config.laptopSoundPercent) percent, microphone $($config.microphonePercent) percent"
+# the mixer sends the microphone now, so windows must not send it as well or it would be heard twice
+& $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
 
 $stopSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $audioMixStopName)
 $muteSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $audioMixMuteName)
@@ -367,6 +369,8 @@ while (-not $stopSignal.WaitOne(200)) {
   [AudioMixer]::MicrophoneMuted = $muteSignal.WaitOne(0)
   if ([AudioMixer]::Failure) {
     Write-MixLog "stopped working: $([AudioMixer]::Failure)"
+    # keep the microphone going the old way so the stream isn't left silent
+    if ((Test-Path $streamActivePath) -and -not $muteSignal.WaitOne(0)) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1 }
     break
   }
 }

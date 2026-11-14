@@ -263,6 +263,22 @@ function Get-StartCommand([bool]$runnerWorks) {
   if ($runnerWorks) { "`"$runnerPath`" broadcast.ps1 start" } else { Get-HiddenCommand 'broadcast.ps1' 'start' }
 }
 
+# true when the audio mixer is running and playing into the cable
+function Test-AudioMix {
+  $mixReady = $null
+  [System.Threading.EventWaitHandle]::TryOpenExisting($audioMixReadyName, [ref]$mixReady)
+}
+
+# turns the microphone in the stream on or off, through the mixer when it's running and through windows otherwise
+function Set-StreamMicrophone([string]$microphone, [bool]$on) {
+  $mixMute = $null
+  if ((Test-AudioMix) -and [System.Threading.EventWaitHandle]::TryOpenExisting($audioMixMuteName, [ref]$mixMute)) {
+    if ($on) { [void]$mixMute.Reset() } else { [void]$mixMute.Set() }
+    return
+  }
+  & $svclPath /SetListenToThisDevice $microphone ([int]$on)
+}
+
 function Start-Hidden([string]$script, [string]$arguments = '') {
   Start-Process conhost.exe ((Get-HiddenCommand $script $arguments) -replace '^conhost\.exe ', '')
 }

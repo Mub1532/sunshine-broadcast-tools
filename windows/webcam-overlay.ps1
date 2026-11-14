@@ -417,7 +417,7 @@ $overlay.Add_VideoStarted({
 })
 $overlay.MicrophoneToggled = [Action[bool]]{
   param($microphoneOn)
-  & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
+  Set-StreamMicrophone $deviceConfig.microphone $microphoneOn
 }
 $requestEnd = {
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {

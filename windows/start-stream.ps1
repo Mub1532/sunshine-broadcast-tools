@@ -112,7 +112,7 @@ if (-not $isCasting) {
 }
 
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay)\.ps1|broadcast\.ps1"? guard' } |
+  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay|audio-mix)\.ps1|broadcast\.ps1"? guard' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -ErrorAction SilentlyContinue |
   Where-Object CommandLine -match '--tray' |
