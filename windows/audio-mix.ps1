@@ -83,6 +83,27 @@ interface IMixAudioClient {
   [PreserveSig] int GetService(ref Guid id, [MarshalAs(UnmanagedType.IUnknown)] out object service);
 }
 
+[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMixEndpointVolume {
+  [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+  [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+  [PreserveSig] int GetChannelCount(out uint count);
+  [PreserveSig] int SetMasterVolumeLevel(float level, IntPtr context);
+  [PreserveSig] int SetMasterVolumeLevelScalar(float level, IntPtr context);
+  [PreserveSig] int GetMasterVolumeLevel(out float level);
+  [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+  [PreserveSig] int SetChannelVolumeLevel(uint channel, float level, IntPtr context);
+  [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, IntPtr context);
+  [PreserveSig] int GetChannelVolumeLevel(uint channel, out float level);
+  [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+  [PreserveSig] int SetMute(int mute, IntPtr context);
+  [PreserveSig] int GetMute(out int mute);
+  [PreserveSig] int GetVolumeStepInfo(out uint step, out uint steps);
+  [PreserveSig] int VolumeStepUp(IntPtr context);
+  [PreserveSig] int VolumeStepDown(IntPtr context);
+  [PreserveSig] int QueryHardwareSupport(out uint support);
+}
+
 [ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 interface IMixCaptureClient {
   [PreserveSig] int GetBuffer(out IntPtr data, out uint frames, out uint flags, out ulong devicePosition, out ulong clockPosition);
@@ -99,6 +120,7 @@ interface IMixRenderClient {
 // one sound device opened for capture or playback, with its format worked out
 class MixStream {
   public IMixAudioClient Client;
+  public IMixEndpointVolume Volume;
   public int Rate, Channels, Bits, BlockAlign;
   public bool IsFloat;
 
@@ -132,6 +154,11 @@ class MixStream {
       stream.IsFloat = tag == 3 || (tag == 0xFFFE && Marshal.ReadInt32(format, 24) == 3);
       if (!(stream.IsFloat && stream.Bits == 32) && stream.Bits != 16 && stream.Bits != 24 && stream.Bits != 32) throw new Exception(name + " uses a sound format this can't handle (" + stream.Bits + "-bit)");
       Check(stream.Client.Initialize(0, loopback ? 0x00020000 : 0, 2000000, 0, format, IntPtr.Zero), "starting " + name);
+      if (loopback) {
+        Guid volumeId = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        object volumeObject;
+        if (device.Activate(ref volumeId, 23, IntPtr.Zero, out volumeObject) >= 0) stream.Volume = (IMixEndpointVolume)volumeObject;
+      }
       return stream;
     }
     throw new Exception("could not find the sound device '" + name + "'");
@@ -240,6 +267,17 @@ public static class AudioMixer {
     catch (Exception error) { failure = part + ": " + error.Message; running = false; }
   }
 
+  // windows hands over the laptop sound already turned down by the laptop's volume. this is how much to turn it back up, so the stream
+  // gets the same loudness whatever the laptop is set to. speakers with their own hardware volume aren't turned down, so they need nothing
+  static float VolumeBoost(MixStream stream) {
+    if (stream.Volume == null) return 1f;
+    uint support;
+    if (stream.Volume.QueryHardwareSupport(out support) >= 0 && (support & 1) != 0) return 1f;
+    float decibels;
+    if (stream.Volume.GetMasterVolumeLevel(out decibels) < 0 || decibels >= 0) return 1f;
+    return (float)Math.Pow(10, Math.Min(-decibels, 60) / 20);
+  }
+
   // reads a device and queues it as one channel at the output's rate. speakers are averaged, for a microphone the loudest channel is used
   static void Capture(MixStream stream, MixQueue queue, int outputRate, bool pickLoudest) {
     Guid captureId = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
@@ -255,8 +293,11 @@ public static class AudioMixer {
     int sampleBytes = stream.BlockAlign / stream.Channels;
     double position = 0;
     float previous = 0;
+    float boost = VolumeBoost(stream), boostNow = boost;
+    int checks = 0;
     while (running) {
       Thread.Sleep(5);
+      if (++checks % 40 == 0) boost = VolumeBoost(stream);
       uint packet;
       while (running && capture.GetNextPacketSize(out packet) >= 0 && packet > 0) {
         IntPtr data;
@@ -279,7 +320,8 @@ public static class AudioMixer {
             if (channel == loudest) picked = sample;
             loudness[channel] = loudness[channel] * 0.9999 + sample * sample;
           }
-          mono[frame] = pickLoudest ? picked : sum / stream.Channels;
+          boostNow += (boost - boostNow) * 0.001f;
+          mono[frame] = (pickLoudest ? picked : sum / stream.Channels) * boostNow;
         }
 
         int needed = (int)((long)count * outputRate / stream.Rate) + 2;
