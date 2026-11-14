@@ -51,6 +51,8 @@ function Start-AudioMix {
 function Stop-Broadcast {
   Remove-Item $streamActivePath -ErrorAction SilentlyContinue
   if (-not $isCasting) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0 }
+  $recordStop = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($recordStopName, [ref]$recordStop)) { [void]$recordStop.Set() }
   $mixStop = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($audioMixStopName, [ref]$mixStop)) { [void]$mixStop.Set() }
   $overlayClose = $null

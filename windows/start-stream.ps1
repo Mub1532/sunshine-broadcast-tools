@@ -112,11 +112,24 @@ if (-not $isCasting) {
 }
 
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay|audio-mix)\.ps1|broadcast\.ps1"? guard' } |
+  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay|audio-mix|record)\.ps1|broadcast\.ps1"? guard' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -ErrorAction SilentlyContinue |
   Where-Object CommandLine -match '--tray' |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+# recording is only for broadcast, and starts as soon as yes is clicked
+$wantsRecording = $false
+if (-not $isCasting) {
+  $progressForm.Hide()
+  $wantsRecording = (Show-Message $messageConfig.recordAsk 'Question' 'YesNo') -eq 'Yes'
+  $progressForm.Show()
+  Show-OnTop $progressForm
+  if ($wantsRecording) {
+    Start-Hidden 'record.ps1'
+    $recordingStarted = Get-Date
+  }
+}
 
 & (Join-Path $appDir 'broadcast.ps1') start
 if (-not $isCasting) { Start-Hidden 'webcam-overlay.ps1' }
@@ -136,6 +149,21 @@ if (-not (Test-SunshineReady)) {
 Start-Hidden 'broadcast.ps1' 'guard -session'
 if (-not $isCasting) { Wait-Until { Test-OverlayReady } 20 | Out-Null }
 
+# the recorder gets time to come up. if it didn't, say so, because the stream itself carries on fine without it
+$recordingFailed = $false
+if ($wantsRecording) {
+  # waits until it's recording, or until it has clearly given up (it has had 10 seconds and is no longer running)
+  Wait-Until {
+    $recordReady = $null
+    $recordLock = $null
+    [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady) -or
+    (((Get-Date) - $recordingStarted).TotalSeconds -gt 10 -and -not [System.Threading.Mutex]::TryOpenExisting($recordLockName, [ref]$recordLock))
+  } 45 | Out-Null
+  $recordReady = $null
+  $recordingFailed = -not [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady)
+}
+
 $progressForm.Close()
 $startingSignal.Dispose()
+if ($recordingFailed) { Show-Message $messageConfig.recordFailed 'Warning' | Out-Null }
 Show-Message $readyMessage | Out-Null
