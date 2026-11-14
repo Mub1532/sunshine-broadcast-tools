@@ -6,7 +6,7 @@ param([int]$seconds = 0)
 $config = @{
   framesPerSecond = 30
   # picture quality, lower = sharper and bigger files, higher = softer and smaller. 18 to 30 is the sensible range
-  quality         = 24
+  quality         = 28
   soundKbps       = 128
 }
 
