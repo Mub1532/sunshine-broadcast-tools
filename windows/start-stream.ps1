@@ -126,8 +126,17 @@ if (-not $isCasting) {
   $progressForm.Show()
   Show-OnTop $progressForm
   if ($wantsRecording) {
-    Start-Hidden 'record.ps1'
-    $recordingStarted = Get-Date
+    if ((Get-FreeGB ([Environment]::GetFolderPath('MyVideos'))) -lt 5) {
+      $progressForm.Hide()
+      Show-Message (Format-Text $messageConfig.recordNoSpace @{ need = 5 }) 'Warning' | Out-Null
+      $progressForm.Show()
+      Show-OnTop $progressForm
+      $wantsRecording = $false
+    }
+    else {
+      Start-Hidden 'record.ps1'
+      $recordingStarted = Get-Date
+    }
   }
 }
 

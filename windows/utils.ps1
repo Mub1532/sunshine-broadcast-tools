@@ -58,6 +58,12 @@ function Format-Text([string]$template, [hashtable]$values) {
   $template
 }
 
+# free space in GB on the drive a path lives on. returns infinity if it can't be read, so a failed check never blocks recording
+function Get-FreeGB([string]$path) {
+  try { return (New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))).AvailableFreeSpace / 1GB }
+  catch { return [double]::PositiveInfinity }
+}
+
 function Show-OnTop([System.Windows.Forms.Form]$form) {
   $form.TopMost = $true
   $form.Activate()

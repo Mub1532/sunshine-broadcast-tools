@@ -8,6 +8,8 @@ $config = @{
   # picture quality, lower = sharper and bigger files, higher = softer and smaller. 18 to 30 is the sensible range
   quality         = 28
   soundKbps       = 128
+  # stops recording if the disk gets this close to full, so it never fills the drive. the stream keeps running
+  keepFreeGB      = 2
 }
 
 $recordLock = New-Object System.Threading.Mutex($false, $recordLockName)
@@ -170,7 +172,15 @@ $stopSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset',
 $pauseSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $recordPauseName)
 $readySignal = New-Object System.Threading.EventWaitHandle($true, 'ManualReset', $recordReadyName)
 $recordingNow = $true
+$spaceChecks = 0
 while (-not $stopSignal.WaitOne(200)) {
+  # every ~5 seconds, stop cleanly if the disk is nearly full so it never fills up. the stream itself carries on
+  if ($recordingNow -and ++$spaceChecks % 25 -eq 0 -and (Get-FreeGB $folder) -lt $config.keepFreeGB) {
+    Complete-Recording
+    Write-RecordLog 'stopped because the disk is nearly full'
+    Show-Message (Format-Text $messageConfig.recordStoppedSpace @{ need = $config.keepFreeGB }) 'Warning' | Out-Null
+    [Environment]::Exit(0)
+  }
   # pausing finishes the current file, and resuming starts a new one, so every file is complete and plays on its own
   if ($pauseSignal.WaitOne(0)) {
     if ($recordingNow) {
