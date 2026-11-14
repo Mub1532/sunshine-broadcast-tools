@@ -169,7 +169,8 @@ function Join-Recordings {
   $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm')).mkv"
   Remove-Item $joinPath -ErrorAction SilentlyContinue
 
-  $problem = [Recorder]::Start($libmpvPath, @("o=$joinPath", 'ovc=copy', 'oac=copy', 'demuxer-lavf-format=concat', 'demuxer-lavf-o=safe=0'), $listPath)
+  $problem = [Recorder]::Start($libmpvPath, @("o=$joinPath", 'ovc=copy', 'oac=copy', 'demuxer=lavf', 'demuxer-lavf-format=concat', 'demuxer-lavf-o=safe=0'), $listPath)
+  if ($problem) { Write-RecordLog "join could not start: $problem" }
   if (-not $problem) {
     for ($wait = 0; $wait -lt 300; $wait++) {
       Start-Sleep -Milliseconds 200
