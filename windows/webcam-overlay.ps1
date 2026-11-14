@@ -358,7 +358,7 @@ public class OverlayForm : Form {
     endButton.Location = new Point(Right - endButton.Width - ButtonInset, Top + ButtonInset);
     cameraButton.Location = new Point(Right - cameraButton.Width - ButtonInset, Bottom - cameraButton.Height - ButtonInset);
     microphoneButton.Location = new Point(cameraButton.Left - microphoneButton.Width - ButtonGap, cameraButton.Top);
-    recordButton.Location = new Point(Left + ButtonInset, Bottom - recordButton.Height - ButtonInset);
+    recordButton.Location = new Point(Left + ButtonInset, Top + ButtonInset);
   }
 
   protected override void OnPaintBackground(PaintEventArgs args) {
