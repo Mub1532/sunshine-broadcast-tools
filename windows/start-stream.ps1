@@ -118,25 +118,19 @@ Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -Err
   Where-Object CommandLine -match '--tray' |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-# recording is only for broadcast, and starts as soon as yes is clicked
+# recording is only for broadcast. the question is asked now, but it doesn't actually start until the stream is up
 $wantsRecording = $false
 if (-not $isCasting) {
   $progressForm.Hide()
   $wantsRecording = (Show-Message $messageConfig.recordAsk 'Question' 'YesNo') -eq 'Yes'
   $progressForm.Show()
   Show-OnTop $progressForm
-  if ($wantsRecording) {
-    if ((Get-FreeGB ([Environment]::GetFolderPath('MyVideos'))) -lt 5) {
-      $progressForm.Hide()
-      Show-Message (Format-Text $messageConfig.recordNoSpace @{ need = 5 }) 'Warning' | Out-Null
-      $progressForm.Show()
-      Show-OnTop $progressForm
-      $wantsRecording = $false
-    }
-    else {
-      Start-Hidden 'record.ps1'
-      $recordingStarted = Get-Date
-    }
+  if ($wantsRecording -and (Get-FreeGB ([Environment]::GetFolderPath('MyVideos'))) -lt 5) {
+    $progressForm.Hide()
+    Show-Message (Format-Text $messageConfig.recordNoSpace @{ need = 5 }) 'Warning' | Out-Null
+    $progressForm.Show()
+    Show-OnTop $progressForm
+    $wantsRecording = $false
   }
 }
 
@@ -157,6 +151,12 @@ if (-not (Test-SunshineReady)) {
 
 Start-Hidden 'broadcast.ps1' 'guard -session'
 if (-not $isCasting) { Wait-Until { Test-OverlayReady } 20 | Out-Null }
+
+# recording starts here, once the stream and the camera box are actually up, not when the button was first pressed
+if ($wantsRecording) {
+  Start-Hidden 'record.ps1'
+  $recordingStarted = Get-Date
+}
 
 # the recorder gets time to come up. if it didn't, say so, because the stream itself carries on fine without it
 $recordingFailed = $false
