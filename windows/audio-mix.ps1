@@ -3,8 +3,10 @@
 
 # how loud each part is in what the stream hears. 100 = full, 0 = off
 $config = @{
-  laptopSoundPercent = 5
-  microphonePercent  = 100
+  laptopSoundPercent          = 15
+  # while the microphone is muted the laptop sound fades up to this, and fades back down when it's unmuted
+  laptopSoundPercentWhenMuted = 50
+  microphonePercent           = 100
 }
 
 $mixLock = New-Object System.Threading.Mutex($false, $audioMixLockName)
@@ -188,7 +190,8 @@ public static class AudioMixer {
   static string details = "";
 
   public static volatile bool MicrophoneMuted;
-  public static volatile float LaptopLevel = 0.05f;
+  public static volatile float LaptopLevel = 0.15f;
+  public static volatile float LaptopLevelWhenMuted = 0.5f;
   public static volatile float MicrophoneLevel = 1f;
   public static string Failure { get { return failure; } }
   public static string Details { get { return details; } }
@@ -316,6 +319,9 @@ public static class AudioMixer {
     var laptop = new float[0];
     var bytes = new byte[0];
     int sampleBytes = stream.BlockAlign / stream.Channels;
+    // levels glide to where they should be, so muting doesn't click and the laptop sound fades over about a second and a half
+    float microphoneNow = 0f, laptopNow = LaptopLevel;
+    float microphoneGlide = 1f - (float)Math.Exp(-1.0 / (stream.Rate * 0.02)), laptopGlide = 1f - (float)Math.Exp(-1.0 / (stream.Rate * 0.5));
     bool started = false;
     while (running) {
       Thread.Sleep(5);
@@ -336,9 +342,11 @@ public static class AudioMixer {
       laptopQueue.Take(laptop, count);
       int size = count * stream.BlockAlign;
       if (bytes.Length < size) bytes = new byte[size];
-      float microphoneLevel = MicrophoneMuted ? 0f : MicrophoneLevel, laptopLevel = LaptopLevel;
+      float microphoneLevel = MicrophoneMuted ? 0f : MicrophoneLevel, laptopLevel = MicrophoneMuted ? LaptopLevelWhenMuted : LaptopLevel;
       for (int frame = 0; frame < count; frame++) {
-        float mixed = microphone[frame] * microphoneLevel + laptop[frame] * laptopLevel;
+        microphoneNow += (microphoneLevel - microphoneNow) * microphoneGlide;
+        laptopNow += (laptopLevel - laptopNow) * laptopGlide;
+        float mixed = microphone[frame] * microphoneNow + laptop[frame] * laptopNow;
         for (int channel = 0; channel < stream.Channels; channel++) stream.WriteSample(bytes, frame * stream.BlockAlign + channel * sampleBytes, mixed);
       }
       IntPtr data;
@@ -352,13 +360,14 @@ public static class AudioMixer {
 '@
 
 [AudioMixer]::LaptopLevel = $config.laptopSoundPercent / 100
+[AudioMixer]::LaptopLevelWhenMuted = $config.laptopSoundPercentWhenMuted / 100
 [AudioMixer]::MicrophoneLevel = $config.microphonePercent / 100
 $problem = [AudioMixer]::Start((Get-WindowsName $deviceConfig.speakers), (Get-WindowsName $deviceConfig.microphone), (Get-WindowsName $cableId))
 if ($problem) {
   Write-MixLog "could not start: $problem"
   exit 1
 }
-Write-MixLog "started ($([AudioMixer]::Details)), laptop sound $($config.laptopSoundPercent) percent, microphone $($config.microphonePercent) percent"
+Write-MixLog "started ($([AudioMixer]::Details)), laptop sound $($config.laptopSoundPercent) percent ($($config.laptopSoundPercentWhenMuted) while muted), microphone $($config.microphonePercent) percent"
 # the mixer sends the microphone now, so windows must not send it as well or it would be heard twice
 & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0
 
