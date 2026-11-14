@@ -140,15 +140,56 @@ function Start-Recording([string]$encoder, [string]$encoderOptions) {
   $false
 }
 
+# every finished piece this session, so they can be joined into one file at the end
+$script:segments = @()
+
 # finishes the file properly and adds the time it ended to its name
 function Complete-Recording {
   [Recorder]::Stop()
   $finalPath = Join-Path $folder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
   try {
     Rename-Item $filePath $finalPath -ErrorAction Stop
+    $script:segments += $finalPath
     Write-RecordLog "finished, saved as $finalPath"
   }
-  catch { Write-RecordLog "finished, saved as $filePath (could not add the end time to the name)" }
+  catch {
+    $script:segments += $filePath
+    Write-RecordLog "finished, saved as $filePath (could not add the end time to the name)"
+  }
+}
+
+# when a stream ends cleanly and pausing split it into pieces, joins them into one file and deletes the pieces.
+# each piece is a complete, playable file on its own, so if this never runs (a crash) nothing is lost, just left separate
+function Join-Recordings {
+  $parts = @($script:segments | Where-Object { Test-Path $_ })
+  if ($parts.Count -le 1) { return }
+
+  $listPath = Join-Path $env:TEMP "sbt-join-$PID.txt"
+  ($parts | ForEach-Object { "file '$($_.Replace("'", "'\''"))'" }) -join "`n" | Set-Content $listPath -Encoding UTF8
+  $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm')).mkv"
+  Remove-Item $joinPath -ErrorAction SilentlyContinue
+
+  $problem = [Recorder]::Start($libmpvPath, @("o=$joinPath", 'ovc=copy', 'oac=copy', 'demuxer-lavf-format=concat', 'demuxer-lavf-o=safe=0'), $listPath)
+  if (-not $problem) {
+    for ($wait = 0; $wait -lt 300; $wait++) {
+      Start-Sleep -Milliseconds 200
+      [Recorder]::Check()
+      if ([Recorder]::Ended) { break }
+    }
+    [Recorder]::Stop()
+  }
+  Remove-Item $listPath -ErrorAction SilentlyContinue
+
+  # only delete the pieces if the joined file really came out, so a failed join never loses footage
+  $largestPart = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Maximum).Maximum
+  if ((Test-Path $joinPath) -and (Get-Item $joinPath).Length -ge $largestPart) {
+    foreach ($part in $parts) { Remove-Item $part -ErrorAction SilentlyContinue }
+    Write-RecordLog "joined $($parts.Count) pieces into $joinPath"
+  }
+  else {
+    Remove-Item $joinPath -ErrorAction SilentlyContinue
+    Write-RecordLog 'could not join the pieces, kept them as separate files'
+  }
 }
 
 $working = $null
@@ -208,5 +249,6 @@ while (-not $stopSignal.WaitOne(200)) {
   if ($seconds -gt 0 -and ((Get-Date) - $scriptStarted).TotalSeconds -ge $seconds) { break }
 }
 if ($recordingNow) { Complete-Recording }
+Join-Recordings
 Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $folder }) | Out-Null
 [Environment]::Exit(0)
