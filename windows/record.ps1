@@ -28,10 +28,15 @@ if (-not (Test-Path $libmpvPath)) {
 
 $folder = Join-Path ([Environment]::GetFolderPath('MyVideos')) 'Sunshine Broadcast Tools'
 New-Item $folder -ItemType Directory -Force | Out-Null
-$startedAt = Get-Date
-$baseName = "SBT_Recording_$($startedAt.ToString('dd-MM-yyyy_HH.mm'))"
-$filePath = Join-Path $folder "$baseName.mkv"
-for ($copy = 2; Test-Path $filePath; $copy++) { $filePath = Join-Path $folder "${baseName}_$copy.mkv" }
+$scriptStarted = Get-Date
+
+# picks the name for the next file from the time right now
+function Set-RecordingPath {
+  $baseName = "SBT_Recording_$((Get-Date).ToString('dd-MM-yyyy_HH.mm'))"
+  $script:filePath = Join-Path $folder "$baseName.mkv"
+  for ($copy = 2; Test-Path $script:filePath; $copy++) { $script:filePath = Join-Path $folder "${baseName}_$copy.mkv" }
+}
+Set-RecordingPath
 
 Import-CSharp 'recorder' @'
 using System;
@@ -133,37 +138,64 @@ function Start-Recording([string]$encoder, [string]$encoderOptions) {
   $false
 }
 
-$recording = $false
+# finishes the file properly and adds the time it ended to its name
+function Complete-Recording {
+  [Recorder]::Stop()
+  $finalPath = Join-Path $folder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
+  try {
+    Rename-Item $filePath $finalPath -ErrorAction Stop
+    Write-RecordLog "finished, saved as $finalPath"
+  }
+  catch { Write-RecordLog "finished, saved as $filePath (could not add the end time to the name)" }
+}
+
+$working = $null
 foreach ($encoder in $encoders) {
   # first with our quality setting, then with the encoder's own defaults in case it doesn't know that setting
-  if ((Start-Recording $encoder[0] $encoder[1]) -or (Start-Recording $encoder[0] '')) {
-    $recording = $true
-    Write-RecordLog "started with $($encoder[0]), saving to $filePath"
-    break
+  foreach ($encoderOptions in $encoder[1], '') {
+    if (Start-Recording $encoder[0] $encoderOptions) {
+      $working = @($encoder[0], $encoderOptions)
+      break
+    }
   }
+  if ($working) { break }
 }
-if (-not $recording) {
+if (-not $working) {
   Write-RecordLog 'could not start: no way of compressing the video worked'
   exit 1
 }
+Write-RecordLog "started with $($working[0]), saving to $filePath"
 
 $stopSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $recordStopName)
+$pauseSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $recordPauseName)
 $readySignal = New-Object System.Threading.EventWaitHandle($true, 'ManualReset', $recordReadyName)
+$recordingNow = $true
 while (-not $stopSignal.WaitOne(200)) {
+  # pausing finishes the current file, and resuming starts a new one, so every file is complete and plays on its own
+  if ($pauseSignal.WaitOne(0)) {
+    if ($recordingNow) {
+      Complete-Recording
+      $recordingNow = $false
+      Write-RecordLog 'paused'
+    }
+    continue
+  }
+  if (-not $recordingNow) {
+    Set-RecordingPath
+    if (-not (Start-Recording $working[0] $working[1])) {
+      Write-RecordLog 'could not resume'
+      break
+    }
+    $recordingNow = $true
+    Write-RecordLog "resumed, saving to $filePath"
+    continue
+  }
   [Recorder]::Check()
   if ([Recorder]::Ended) {
     Write-RecordLog 'stopped by itself before the stream ended'
     break
   }
-  if ($seconds -gt 0 -and ((Get-Date) - $startedAt).TotalSeconds -ge $seconds) { break }
+  if ($seconds -gt 0 -and ((Get-Date) - $scriptStarted).TotalSeconds -ge $seconds) { break }
 }
-[Recorder]::Stop()
-
-# the finished file gets the time it ended added to its name
-$finalPath = Join-Path $folder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
-try {
-  Rename-Item $filePath $finalPath -ErrorAction Stop
-  Write-RecordLog "finished, saved as $finalPath"
-}
-catch { Write-RecordLog "finished, saved as $filePath (could not add the end time to the name)" }
+if ($recordingNow) { Complete-Recording }
 [Environment]::Exit(0)

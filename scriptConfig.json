@@ -32,6 +32,8 @@
   "endShortcutTip": "End the broadcast stream and stop Sunshine",
 
   "endButton": "End Stream",
+  "pauseRecordingButton": "Pause Recording",
+  "resumeRecordingButton": "Resume Recording",
   "cameraOff": "Turn camera off",
   "cameraOn": "Turn camera on",
   "micMute": "Mute microphone",
