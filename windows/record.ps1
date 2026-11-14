@@ -250,5 +250,7 @@ while (-not $stopSignal.WaitOne(200)) {
 }
 if ($recordingNow) { Complete-Recording }
 Join-Recordings
-Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $folder }) | Out-Null
+# a short path for the popup, eg "Videos\Sunshine Broadcast Tools" instead of the full C:\Users\... path
+$shortFolder = $folder.Replace("$env:USERPROFILE\", '')
+Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $shortFolder }) | Out-Null
 [Environment]::Exit(0)
