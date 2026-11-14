@@ -135,7 +135,7 @@ public class OverlayButton : Form {
   }
   public static int Scaled(int value) { return (int)Math.Round(value * DisplayScale); }
 
-  public OverlayButton(string text, string fontName, float fontSize, Size size) {
+  public OverlayButton(string text, string fontName, float fontSize, Size padding) {
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
@@ -154,12 +154,10 @@ public class OverlayButton : Form {
     Button.Cursor = Cursors.Hand;
     Controls.Add(Button);
 
-    // scaled base size, made bigger if the text still doesnt fit
+    // sized from its own text plus a little padding, so it fits at any display scaling, font or wording
     SizeF textSize;
     using (var graphics = CreateGraphics()) textSize = graphics.MeasureString(text, Button.Font);
-    Size = new Size(
-      Math.Max(Scaled(size.Width), (int)Math.Ceiling(textSize.Width) + Scaled(12)),
-      Math.Max(Scaled(size.Height), (int)Math.Ceiling(textSize.Height) + Scaled(6)));
+    Size = new Size((int)Math.Ceiling(textSize.Width) + Scaled(padding.Width), (int)Math.Ceiling(textSize.Height) + Scaled(padding.Height));
   }
 
   public void SetLook(Color color, string tip) {
@@ -228,9 +226,9 @@ public class OverlayForm : Form {
     BackColor = Color.Black;
 
     string iconFont = IsFontInstalled("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
-    endButton = new OverlayButton(endLabel, "Segoe UI", 8.5f, new Size(92, 24));
-    cameraButton = new OverlayButton(CameraGlyph, iconFont, 11f, new Size(34, 30));
-    microphoneButton = new OverlayButton(MicrophoneGlyph, iconFont, 11f, new Size(34, 30));
+    endButton = new OverlayButton(endLabel, "Segoe UI", 8.5f, new Size(10, 6));
+    cameraButton = new OverlayButton(CameraGlyph, iconFont, 11f, new Size(8, 8));
+    microphoneButton = new OverlayButton(MicrophoneGlyph, iconFont, 11f, new Size(8, 8));
     endButton.SetLook(Red, endLabel);
     UpdateToggleLooks();
 
