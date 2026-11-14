@@ -198,4 +198,5 @@ while (-not $stopSignal.WaitOne(200)) {
   if ($seconds -gt 0 -and ((Get-Date) - $scriptStarted).TotalSeconds -ge $seconds) { break }
 }
 if ($recordingNow) { Complete-Recording }
+Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $folder }) | Out-Null
 [Environment]::Exit(0)

@@ -40,5 +40,6 @@
   "markWorkingFailed": "Could not save this version: {error}",
   "runnerFallback": "Note: run-hidden.exe doesn't work on this laptop, so streams use the old hidden method instead. Streaming still works, but devices that aren't set up properly for broadcast get a warning instead of being refused. The reason is in debug.log.",
   "recordAsk": "Do you want to record this stream?",
-  "recordFailed": "The recording could not be started, so this stream is not being recorded. The stream itself is not affected."
+  "recordFailed": "The recording could not be started, so this stream is not being recorded. The stream itself is not affected.",
+  "recordSaved": "Recording saved to:\n{folder}"
 }
