@@ -529,17 +529,28 @@ if ($applyFrom -or $repair) {
 $setupShown = $null
 if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
 $restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
-$originalRestoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-orig\restore.ps1'
 $lastWorkingDir = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-last-working'
 $lastWorkingRestoreScript = Join-Path $lastWorkingDir 'restore.ps1'
+# the last known-good main, from before the disconnect-notice/messageConfig change that broke run-hidden on some laptops
+$originalCommit = '34d3b6527894f134c63081d5dd4543d20f4a09ca'
 $menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
 $restoreChoices = @{}
 if (Test-Path $restoreScript) { $restoreChoices[$menuChoices.Count] = $restoreScript; $menuChoices += $scriptConfig.undoButton }
-if (Test-Path $originalRestoreScript) { $restoreChoices[$menuChoices.Count] = $originalRestoreScript; $menuChoices += $scriptConfig.undoOriginalButton }
+# revert to original is always offered: it reinstalls that known-good main and then opens its setup
+$originalChoice = $menuChoices.Count
+$menuChoices += $scriptConfig.undoOriginalButton
 if (Test-Path $lastWorkingRestoreScript) { $restoreChoices[$menuChoices.Count] = $lastWorkingRestoreScript; $menuChoices += $scriptConfig.undoLastWorkingButton }
 $markWorkingChoice = $menuChoices.Count
 $menuChoices += $scriptConfig.markWorkingButton
 $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
+if ($menuChoice -eq $originalChoice) {
+  # reinstall the known-good main at that commit (this installer supports pinning a commit), elevated, which opens its setup
+  $installScript = Join-Path $appDir 'install.ps1'
+  $inner = "`$sbtCommit = '$originalCommit'; & '$installScript'"
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+  Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded" -Verb RunAs
+  exit
+}
 if ($menuChoice -eq $markWorkingChoice) {
   try {
     Remove-Item $lastWorkingDir -Recurse -Force -ErrorAction SilentlyContinue
