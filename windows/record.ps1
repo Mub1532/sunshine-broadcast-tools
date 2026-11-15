@@ -159,21 +159,31 @@ function Complete-Recording {
   }
 }
 
-# when a clean end leaves more than one piece (from pausing), ffmpeg joins them into one "_full" file without re-encoding,
-# then deletes the pieces so only the one file is left. the pieces are only deleted once the joined file came out complete
-# (about the size of all the pieces together, since copying is lossless). if the join fails, or a crash skips this, the
-# pieces just stay in the folder as separate playable files - nothing is ever lost.
+# when a clean end leaves more than one piece (from pausing), ffmpeg stitches them into one "_full" file with the concat
+# FILTER (it decodes and re-joins with fresh timestamps, so there's no frozen gap at the joins the way a plain copy gives).
+# the graphics chip re-encodes it, fast, since the stream has ended. pieces are only deleted once the joined file is really
+# there; if the join fails or a crash skips it, the pieces stay as separate playable files - nothing is ever lost.
 function Join-Recordings {
   $parts = @($script:segments | Where-Object { Test-Path $_ })
   if ($parts.Count -le 1 -or -not (Test-Path $ffmpegPath)) { return }
 
-  $listPath = Join-Path $env:TEMP "sbt-join-$PID.txt"
-  ($parts | ForEach-Object { "file '$($_.Replace("'", "'\''"))'" }) -join "`n" | Set-Content $listPath -Encoding ASCII
-  # "_full" so the joined file can never share a name with one of the pieces
+  # ffmpeg encoder for the re-stitch - chip first, processor as fallback
+  $q = $config.quality
+  $joinEnc =
+    if     ($graphics -match 'NVIDIA')     { "h264_nvenc -rc constqp -qp $q" }
+    elseif ($graphics -match 'AMD|Radeon') { "h264_amf -rc cqp -qp_i $q -qp_p $q -qp_b $q" }
+    elseif ($graphics -match 'Intel')      { "h264_qsv -global_quality $q" }
+    else                                   { "libx264 -preset veryfast -crf $q" }
+
   $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm'))_full.mkv"
   Remove-Item $joinPath -ErrorAction SilentlyContinue
 
-  $joinArgs = "-y -hide_banner -loglevel error -f concat -safe 0 -i `"$listPath`" -c copy `"$joinPath`""
+  $inputs = ($parts | ForEach-Object { "-i `"$_`"" }) -join ' '
+  $streams = (0..($parts.Count - 1) | ForEach-Object { "[$_`:v][$_`:a]" }) -join ''
+  $filter = "${streams}concat=n=$($parts.Count):v=1:a=1[v][a]"
+  $joinArgs = "-y -hide_banner -loglevel error $inputs -filter_complex `"$filter`" -map `"[v]`" -map `"[a]`" " +
+    "-c:v $joinEnc -pix_fmt yuv420p -c:a aac -b:a $($config.soundKbps)k `"$joinPath`""
+
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $ffmpegPath
   $psi.Arguments = $joinArgs
@@ -181,11 +191,12 @@ function Join-Recordings {
   $psi.CreateNoWindow = $true
   $join = [System.Diagnostics.Process]::Start($psi)
   if ($join) { $join.WaitForExit() }
-  Remove-Item $listPath -ErrorAction SilentlyContinue
 
-  $totalParts = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
+  $largestPart = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Maximum).Maximum
   $joinSize = if (Test-Path $joinPath) { (Get-Item $joinPath).Length } else { 0 }
-  if ($join -and $join.ExitCode -eq 0 -and $joinSize -ge $totalParts * 0.9) {
+  Write-RecordLog "join: largest piece $([math]::Round($largestPart / 1MB)) MB, joined $([math]::Round($joinSize / 1MB)) MB"
+  # a full re-encode of every piece is always bigger than any single piece; if it isn't, the join came out short so keep the pieces
+  if ($join -and $join.ExitCode -eq 0 -and $joinSize -ge $largestPart) {
     foreach ($part in $parts) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
     Write-RecordLog "joined $($parts.Count) pieces into $joinPath, pieces deleted"
   }
