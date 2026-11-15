@@ -14,7 +14,7 @@ $silent = [bool]$sbtSilent
 $commit = [string]$sbtCommit
 $installDir = Join-Path $env:ProgramData $repoName
 $windowsDir = Join-Path $installDir 'windows'
-$keepFiles = 'messageConfig.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\Sunshine Broadcast Tools.exe', 'windows\run-hidden.exe', 'broadcast-config-backup', 'casting-config-backup'
+$keepFiles = 'customMessages.json', 'windows\deviceConfig.json', 'windows\svcl.exe', 'windows\libmpv-2.dll', 'windows\ffmpeg.exe', 'windows\Sunshine Broadcast Tools.exe', 'windows\run-hidden.exe', 'broadcast-config-backup', 'casting-config-backup'
 
 $tempDir = Join-Path $env:TEMP "$repoName-install"
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -80,18 +80,8 @@ try {
   Copy-Item "$sourceDir\*" $installDir -Recurse -Force
   if (Test-Path $keptDir) { Copy-Item "$keptDir\*" $installDir -Recurse -Force }
 
-  $messagesPath = Join-Path $installDir 'messageConfig.json'
-  Copy-Item (Join-Path $sourceDir 'messageConfig.json') (Join-Path $installDir 'messageConfig.default.json') -Force
-  $defaultMessages = Get-Content (Join-Path $sourceDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  $currentMessages = Get-Content $messagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  $missingMessages = @($defaultMessages.PSObject.Properties | Where-Object { -not $currentMessages.PSObject.Properties[$_.Name] })
-  if ($missingMessages) {
-    $newLines = $missingMessages | ForEach-Object { "  `"$($_.Name)`": `"$($_.Value.Replace('\', '\\').Replace('"', '\"').Replace("`n", '\n'))`"" }
-    $messagesText = (Get-Content $messagesPath -Raw -Encoding UTF8).TrimEnd().TrimEnd('}').TrimEnd()
-    $messagesText = "$messagesText,`n`n$($newLines -join ",`n")`n}`n"
-    [System.IO.File]::WriteAllText($messagesPath, $messagesText, (New-Object System.Text.UTF8Encoding($false)))
-  }
-
+  # messageConfig.json is always the fresh default from the repo. any user overrides live in customMessages.json (kept across
+  # updates), so new messages always arrive and only the keys the user chose to change are overridden.
   Get-ChildItem $installDir -Recurse -File | Unblock-File
   $setupShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $installDir 'Sunshine Broadcast Setup.lnk'))
   $setupShortcut.TargetPath = Join-Path $env:windir 'System32\conhost.exe'

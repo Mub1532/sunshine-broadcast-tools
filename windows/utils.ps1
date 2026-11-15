@@ -23,12 +23,19 @@ $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
 $scriptConfig = Get-Content (Join-Path $repoDir 'scriptConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$messagesPath = Join-Path $repoDir 'messageConfig.json'
-$defaultMessagesPath = Join-Path $repoDir 'messageConfig.default.json'
-if (-not (Test-Path $messagesPath) -and (Test-Path $defaultMessagesPath)) {
-  try { Copy-Item $defaultMessagesPath $messagesPath } catch {}
+# messageConfig.json is the default (always fresh from the repo). customMessages.json is optional: any keys in it override
+# the matching defaults, so new default messages still arrive on update and only the keys you chose to change are replaced.
+$messageConfig = Get-Content (Join-Path $repoDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$customMessagesPath = Join-Path $repoDir 'customMessages.json'
+if (Test-Path $customMessagesPath) {
+  try {
+    $customMessages = Get-Content $customMessagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($p in $customMessages.PSObject.Properties) {
+      $messageConfig | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
+    }
+  }
+  catch {}
 }
-$messageConfig = Get-Content $(if (Test-Path $messagesPath) { $messagesPath } else { $defaultMessagesPath }) -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $serviceName = 'SunshineService'
 $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'
