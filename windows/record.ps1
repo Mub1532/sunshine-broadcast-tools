@@ -253,8 +253,10 @@ $spaceChecks = 0
 while (-not $stopSignal.WaitOne(200)) {
   # every ~5 seconds, stop cleanly if the disk is nearly full so it never fills up. the stream itself carries on
   if ($recordingNow -and ++$spaceChecks % 25 -eq 0 -and (Get-FreeGB $folder) -lt $config.keepFreeGB) {
+    $savingForm = Show-Progress $messageConfig.recordSaving
     Complete-Recording
     Finish-Recordings
+    $savingForm.Close()
     Write-RecordLog 'stopped because the disk is nearly full'
     Show-Message (Format-Text $messageConfig.recordStoppedSpace @{ need = $config.keepFreeGB }) 'Warning' | Out-Null
     [Environment]::Exit(0)
@@ -285,8 +287,11 @@ while (-not $stopSignal.WaitOne(200)) {
   }
   if ($seconds -gt 0 -and ((Get-Date) - $scriptStarted).TotalSeconds -ge $seconds) { break }
 }
+# show a "saving..." popup straight away so no one closes anything while the pieces are being finished and joined
+$savingForm = Show-Progress $messageConfig.recordSaving
 if ($recordingNow) { Complete-Recording }
 Finish-Recordings
+$savingForm.Close()
 # a short path for the popup, eg "Videos\Sunshine Broadcast Tools" instead of the full C:\Users\... path
 $shortFolder = $folder.Replace("$env:USERPROFILE\", '')
 Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $shortFolder }) | Out-Null
