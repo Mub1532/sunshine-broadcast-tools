@@ -1,4 +1,5 @@
-# records the screen and the stream's sound to a video file. runs for as long as a broadcast is being recorded
+# records the screen and the stream's sound to a video file. runs for as long as a broadcast is being recorded.
+# uses ffmpeg (on the processor, so it never steals the graphics chip from the stream). libmpv is the fallback.
 param([int]$seconds = 0)
 
 . "$PSScriptRoot\utils.ps1"
@@ -7,10 +8,14 @@ $config = @{
   framesPerSecond = 30
   # picture quality, lower = sharper and bigger files, higher = softer and smaller. 18 to 30 is the sensible range
   quality         = 28
+  # processor effort. "ultrafast" is the lightest so even a weak laptop can record while the stream uses the graphics chip
+  preset          = 'ultrafast'
   soundKbps       = 128
   # stops recording if the disk gets this close to full, so it never fills the drive. the stream keeps running
   keepFreeGB      = 2
 }
+
+$audioDevice = 'CABLE Output (VB-Audio Virtual Cable)'
 
 $recordLock = New-Object System.Threading.Mutex($false, $recordLockName)
 if (-not $recordLock.WaitOne(0)) { exit }
@@ -23,8 +28,8 @@ function Write-RecordLog([string]$text) {
   catch {}
 }
 
-if (-not (Test-Path $libmpvPath)) {
-  Write-RecordLog 'could not start: libmpv is not installed'
+if (-not (Test-Path $ffmpegPath) -and -not (Test-Path $libmpvPath)) {
+  Write-RecordLog 'could not start: neither ffmpeg nor libmpv is installed'
   exit 1
 }
 
@@ -40,12 +45,70 @@ function Set-RecordingPath {
 }
 Set-RecordingPath
 
-Import-CSharp 'recorder' @'
+# every finished piece this session, so they can be joined into one file at the end
+$script:segments = @()
+$script:ffProc = $null
+$script:libmpvReady = $false
+
+# ---- ffmpeg engine ----
+
+function Start-FfmpegProcess([string]$arguments, [bool]$withStdin) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $ffmpegPath
+  $psi.Arguments = $arguments
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $withStdin
+  return [System.Diagnostics.Process]::Start($psi)
+}
+
+# ddagrab grabs the screen off the graphics chip, then libx264 compresses it on the processor so the stream is untouched
+function Start-FfmpegPiece {
+  Remove-Item $filePath -ErrorAction SilentlyContinue
+  $fps = $config.framesPerSecond
+  $arguments = '-y -hide_banner -loglevel error -nostats ' +
+    "-f lavfi -i ddagrab=framerate=$fps,hwdownload,format=bgra " +
+    "-f dshow -i `"audio=$audioDevice`" " +
+    "-c:v libx264 -preset $($config.preset) -crf $($config.quality) -pix_fmt yuv420p " +
+    "-c:a aac -b:a $($config.soundKbps)k " +
+    "`"$filePath`""
+  $script:ffProc = Start-FfmpegProcess $arguments $true
+  if (-not $script:ffProc) { return $false }
+  for ($wait = 0; $wait -lt 50; $wait++) {
+    Start-Sleep -Milliseconds 200
+    if ($script:ffProc.HasExited) { Write-RecordLog "ffmpeg stopped right away (code $($script:ffProc.ExitCode))"; return $false }
+    if ((Test-Path $filePath) -and (Get-Item $filePath).Length -gt 0) { return $true }
+  }
+  Stop-FfmpegPiece
+  Write-RecordLog 'ffmpeg did not start writing a file'
+  return $false
+}
+
+# sends "q" so ffmpeg finishes the file properly, same as pressing q in a window
+function Stop-FfmpegPiece {
+  if (-not $script:ffProc) { return }
+  try {
+    if (-not $script:ffProc.HasExited) {
+      $script:ffProc.StandardInput.Write('q')
+      $script:ffProc.StandardInput.Flush()
+      $script:ffProc.StandardInput.Close()
+      if (-not $script:ffProc.WaitForExit(15000)) { $script:ffProc.Kill() }
+    }
+  }
+  catch { try { $script:ffProc.Kill() } catch {} }
+  $script:ffProc = $null
+}
+
+# ---- libmpv engine (fallback) ----
+
+function Initialize-Libmpv {
+  if ($script:libmpvReady) { return $true }
+  if (-not (Test-Path $libmpvPath)) { return $false }
+  Import-CSharp 'recorder' @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-// records the screen and the stream's sound to a file with libmpv, the same library the camera box uses
 public static class Recorder {
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string path);
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
@@ -61,9 +124,7 @@ public static class Recorder {
 
   static byte[] Text(string text) { return Encoding.UTF8.GetBytes(text + "\0"); }
 
-  // options are "name=value". returns an empty string when it started, otherwise what went wrong
   public static string Start(string library, string[] options, string source) {
-    // without this windows hands over a shrunken screen on scaled displays and the recording comes out soft
     SetProcessDPIAware();
     LoadLibrary(library);
     player = mpv_create();
@@ -78,7 +139,6 @@ public static class Recorder {
     return "";
   }
 
-  // reads what libmpv has reported since last time, and notes if the recording ended by itself
   public static void Check() {
     while (player != IntPtr.Zero) {
       int kind = Marshal.ReadInt32(mpv_wait_event(player, 0));
@@ -87,7 +147,6 @@ public static class Recorder {
     }
   }
 
-  // asks libmpv to finish the file properly and waits for it
   public static void Stop() {
     if (player == IntPtr.Zero) return;
     mpv_command_string(player, Text("quit"));
@@ -102,50 +161,59 @@ public static class Recorder {
   }
 }
 '@
+  $script:libmpvReady = $true
+  return $true
+}
 
-# the laptop's graphics chip does the compressing when it can, so recording doesn't slow the stream down. the processor is the fallback
-$graphics = (Get-CimInstance Win32_VideoController).Name -join ', '
-$quality = $config.quality
-$encoders = @()
-if ($graphics -match 'NVIDIA') { $encoders += , @('h264_nvenc', "rc=constqp,qp=$quality") }
-if ($graphics -match 'AMD|Radeon') { $encoders += , @('h264_amf', "rc=cqp,qp_i=$quality,qp_p=$quality") }
-if ($graphics -match 'Intel') { $encoders += , @('h264_qsv', "global_quality=$quality") }
-$encoders += , @('libx264', "preset=veryfast,crf=$quality")
-
-# tries one way of compressing. true when the file is really being written a few seconds later
-function Start-Recording([string]$encoder, [string]$encoderOptions) {
+function Start-LibmpvPiece {
   Remove-Item $filePath -ErrorAction SilentlyContinue
   $options = @(
     "o=$filePath"
-    "ovc=$encoder"
+    'ovc=libx264'
+    "ovcopts=preset=$($config.preset),crf=$($config.quality)"
     'oac=aac'
     "oacopts=b=$($config.soundKbps)k"
-    'audio-files=av://dshow:audio=CABLE Output (VB-Audio Virtual Cable)'
+    "audio-files=av://dshow:audio=$audioDevice"
     'demuxer-lavf-o=audio_buffer_size=50'
   )
-  if ($encoderOptions) { $options += "ovcopts=$encoderOptions" }
   $problem = [Recorder]::Start($libmpvPath, $options, "av://lavfi:ddagrab=framerate=$($config.framesPerSecond),hwdownload,format=bgra,format=yuv420p")
-  if ($problem) {
-    Write-RecordLog "$encoder did not start: $problem"
-    return $false
-  }
-  for ($wait = 0; $wait -lt 40; $wait++) {
+  if ($problem) { Write-RecordLog "libmpv did not start: $problem"; return $false }
+  for ($wait = 0; $wait -lt 50; $wait++) {
     Start-Sleep -Milliseconds 200
     [Recorder]::Check()
     if ([Recorder]::Ended) { break }
     if ((Test-Path $filePath) -and (Get-Item $filePath).Length -gt 0) { return $true }
   }
   [Recorder]::Stop()
-  Write-RecordLog "$encoder did not produce a file$(if ($encoderOptions) { " with $encoderOptions" })"
-  $false
+  Write-RecordLog 'libmpv did not produce a file'
+  return $false
 }
 
-# every finished piece this session, so they can be joined into one file at the end
-$script:segments = @()
+# ---- engine-independent ----
+
+function Start-Segment {
+  if ($script:engine -eq 'ffmpeg') {
+    if (Start-FfmpegPiece) { return $true }
+    Write-RecordLog 'ffmpeg recording failed, falling back to libmpv'
+    if (Initialize-Libmpv) { $script:engine = 'libmpv' } else { return $false }
+  }
+  return (Start-LibmpvPiece)
+}
+
+function Stop-Segment {
+  if ($script:engine -eq 'ffmpeg') { Stop-FfmpegPiece } else { [Recorder]::Stop() }
+}
+
+# true when the recording stopped on its own (ffmpeg died, or libmpv reached the end)
+function Test-SegmentEnded {
+  if ($script:engine -eq 'ffmpeg') { return $script:ffProc.HasExited }
+  [Recorder]::Check()
+  return [Recorder]::Ended
+}
 
 # finishes the file properly and adds the time it ended to its name
 function Complete-Recording {
-  [Recorder]::Stop()
+  Stop-Segment
   $finalPath = Join-Path $folder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
   try {
     Rename-Item $filePath $finalPath -ErrorAction Stop
@@ -158,49 +226,25 @@ function Complete-Recording {
   }
 }
 
-# when a stream ends cleanly and pausing split it into pieces, joins them into one file and deletes the pieces.
-# each piece is a complete, playable file on its own, so if this never runs (a crash) nothing is lost, just left separate
+# when a clean end leaves more than one piece (from pausing), ffmpeg joins them into one file without re-encoding.
+# the pieces are never deleted: once the join is written they're moved into a "pieces" backup subfolder so only the
+# joined file shows. if ffmpeg isn't there, or a crash skips this, the pieces just stay as separate playable files.
 function Join-Recordings {
   $parts = @($script:segments | Where-Object { Test-Path $_ })
-  if ($parts.Count -le 1) { return }
+  if ($parts.Count -le 1 -or -not (Test-Path $ffmpegPath)) { return }
 
   $listPath = Join-Path $env:TEMP "sbt-join-$PID.txt"
-  ($parts | ForEach-Object { "file '$($_.Replace("'", "'\''"))'" }) -join "`n" | Set-Content $listPath -Encoding UTF8
+  ($parts | ForEach-Object { "file '$($_.Replace("'", "'\''"))'" }) -join "`n" | Set-Content $listPath -Encoding ASCII
   # "_full" so the joined file can never share a name with one of the pieces
   $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm'))_full.mkv"
   Remove-Item $joinPath -ErrorAction SilentlyContinue
 
-  # re-encodes the pieces back to back through the same encoder that recorded them. copy mode only grabbed the last piece
-  $joinOptions = @(
-    "o=$joinPath"
-    "ovc=$($working[0])"
-    'oac=aac'
-    "oacopts=b=$($config.soundKbps)k"
-    'demuxer=lavf'
-    'demuxer-lavf-format=concat'
-    'demuxer-lavf-o=safe=0'
-  )
-  if ($working[1]) { $joinOptions += "ovcopts=$($working[1])" }
-
-  $problem = [Recorder]::Start($libmpvPath, $joinOptions, $listPath)
-  if ($problem) { Write-RecordLog "join could not start: $problem" }
-  if (-not $problem) {
-    # waits up to 20 minutes for the join to finish; the stream has already ended so there's nothing else to hold up
-    for ($wait = 0; $wait -lt 6000; $wait++) {
-      Start-Sleep -Milliseconds 200
-      [Recorder]::Check()
-      if ([Recorder]::Ended) { break }
-    }
-    [Recorder]::Stop()
-  }
+  $joinArgs = "-y -hide_banner -loglevel error -f concat -safe 0 -i `"$listPath`" -c copy `"$joinPath`""
+  $join = Start-FfmpegProcess $joinArgs $false
+  if ($join) { $join.WaitForExit() }
   Remove-Item $listPath -ErrorAction SilentlyContinue
 
-  # re-encoding changes the size, so size can't prove the join is complete. the pieces are never deleted: when the join
-  # looks good they're moved into a "pieces" backup subfolder so only the joined file shows, and can be checked then binned
-  $largestPart = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Maximum).Maximum
-  $joinSize = if (Test-Path $joinPath) { (Get-Item $joinPath).Length } else { 0 }
-  Write-RecordLog "join: largest piece $([math]::Round($largestPart / 1MB)) MB, joined file $([math]::Round($joinSize / 1MB)) MB"
-  if ($joinSize -ge $largestPart) {
+  if ($join -and $join.ExitCode -eq 0 -and (Test-Path $joinPath) -and (Get-Item $joinPath).Length -gt 0) {
     $pieceFolder = Join-Path $folder 'pieces'
     New-Item $pieceFolder -ItemType Directory -Force | Out-Null
     foreach ($part in $parts) { Move-Item $part $pieceFolder -Force -ErrorAction SilentlyContinue }
@@ -208,26 +252,23 @@ function Join-Recordings {
   }
   else {
     Remove-Item $joinPath -ErrorAction SilentlyContinue
-    Write-RecordLog 'join did not come out, kept the pieces as separate files'
+    Write-RecordLog "join failed (exit $(if ($join) { $join.ExitCode } else { 'not started' })), kept the pieces as separate files"
   }
 }
 
-$working = $null
-foreach ($encoder in $encoders) {
-  # first with our quality setting, then with the encoder's own defaults in case it doesn't know that setting
-  foreach ($encoderOptions in $encoder[1], '') {
-    if (Start-Recording $encoder[0] $encoderOptions) {
-      $working = @($encoder[0], $encoderOptions)
-      break
-    }
-  }
-  if ($working) { break }
-}
-if (-not $working) {
-  Write-RecordLog 'could not start: no way of compressing the video worked'
+# ---- run ----
+
+$script:engine = if (Test-Path $ffmpegPath) { 'ffmpeg' } else { 'libmpv' }
+if ($script:engine -eq 'libmpv' -and -not (Initialize-Libmpv)) {
+  Write-RecordLog 'could not start: no recorder available'
   exit 1
 }
-Write-RecordLog "started with $($working[0]), saving to $filePath"
+
+if (-not (Start-Segment)) {
+  Write-RecordLog 'could not start: recording would not begin'
+  exit 1
+}
+Write-RecordLog "recording with $script:engine, saving to $filePath"
 
 $stopSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $recordStopName)
 $pauseSignal = New-Object System.Threading.EventWaitHandle($false, 'ManualReset', $recordPauseName)
@@ -238,6 +279,7 @@ while (-not $stopSignal.WaitOne(200)) {
   # every ~5 seconds, stop cleanly if the disk is nearly full so it never fills up. the stream itself carries on
   if ($recordingNow -and ++$spaceChecks % 25 -eq 0 -and (Get-FreeGB $folder) -lt $config.keepFreeGB) {
     Complete-Recording
+    Join-Recordings
     Write-RecordLog 'stopped because the disk is nearly full'
     Show-Message (Format-Text $messageConfig.recordStoppedSpace @{ need = $config.keepFreeGB }) 'Warning' | Out-Null
     [Environment]::Exit(0)
@@ -253,7 +295,7 @@ while (-not $stopSignal.WaitOne(200)) {
   }
   if (-not $recordingNow) {
     Set-RecordingPath
-    if (-not (Start-Recording $working[0] $working[1])) {
+    if (-not (Start-Segment)) {
       Write-RecordLog 'could not resume'
       break
     }
@@ -261,8 +303,7 @@ while (-not $stopSignal.WaitOne(200)) {
     Write-RecordLog "resumed, saving to $filePath"
     continue
   }
-  [Recorder]::Check()
-  if ([Recorder]::Ended) {
+  if (Test-SegmentEnded) {
     Write-RecordLog 'stopped by itself before the stream ended'
     break
   }
