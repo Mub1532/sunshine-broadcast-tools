@@ -166,13 +166,27 @@ function Join-Recordings {
 
   $listPath = Join-Path $env:TEMP "sbt-join-$PID.txt"
   ($parts | ForEach-Object { "file '$($_.Replace("'", "'\''"))'" }) -join "`n" | Set-Content $listPath -Encoding UTF8
-  $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm')).mkv"
+  # "_full" so the joined file can never share a name with one of the pieces
+  $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm'))_full.mkv"
   Remove-Item $joinPath -ErrorAction SilentlyContinue
 
-  $problem = [Recorder]::Start($libmpvPath, @("o=$joinPath", 'ovc=copy', 'oac=copy', 'demuxer=lavf', 'demuxer-lavf-format=concat', 'demuxer-lavf-o=safe=0'), $listPath)
+  # re-encodes the pieces back to back through the same encoder that recorded them. copy mode only grabbed the last piece
+  $joinOptions = @(
+    "o=$joinPath"
+    "ovc=$($working[0])"
+    'oac=aac'
+    "oacopts=b=$($config.soundKbps)k"
+    'demuxer=lavf'
+    'demuxer-lavf-format=concat'
+    'demuxer-lavf-o=safe=0'
+  )
+  if ($working[1]) { $joinOptions += "ovcopts=$($working[1])" }
+
+  $problem = [Recorder]::Start($libmpvPath, $joinOptions, $listPath)
   if ($problem) { Write-RecordLog "join could not start: $problem" }
   if (-not $problem) {
-    for ($wait = 0; $wait -lt 300; $wait++) {
+    # waits up to 20 minutes for the join to finish; the stream has already ended so there's nothing else to hold up
+    for ($wait = 0; $wait -lt 6000; $wait++) {
       Start-Sleep -Milliseconds 200
       [Recorder]::Check()
       if ([Recorder]::Ended) { break }
@@ -181,15 +195,20 @@ function Join-Recordings {
   }
   Remove-Item $listPath -ErrorAction SilentlyContinue
 
-  # only delete the pieces if the joined file really came out, so a failed join never loses footage
+  # re-encoding changes the size, so size can't prove the join is complete. the pieces are never deleted: when the join
+  # looks good they're moved into a "pieces" backup subfolder so only the joined file shows, and can be checked then binned
   $largestPart = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Maximum).Maximum
-  if ((Test-Path $joinPath) -and (Get-Item $joinPath).Length -ge $largestPart) {
-    foreach ($part in $parts) { Remove-Item $part -ErrorAction SilentlyContinue }
-    Write-RecordLog "joined $($parts.Count) pieces into $joinPath"
+  $joinSize = if (Test-Path $joinPath) { (Get-Item $joinPath).Length } else { 0 }
+  Write-RecordLog "join: largest piece $([math]::Round($largestPart / 1MB)) MB, joined file $([math]::Round($joinSize / 1MB)) MB"
+  if ($joinSize -ge $largestPart) {
+    $pieceFolder = Join-Path $folder 'pieces'
+    New-Item $pieceFolder -ItemType Directory -Force | Out-Null
+    foreach ($part in $parts) { Move-Item $part $pieceFolder -Force -ErrorAction SilentlyContinue }
+    Write-RecordLog "joined $($parts.Count) pieces into $joinPath, originals moved to $pieceFolder"
   }
   else {
     Remove-Item $joinPath -ErrorAction SilentlyContinue
-    Write-RecordLog 'could not join the pieces, kept them as separate files'
+    Write-RecordLog 'join did not come out, kept the pieces as separate files'
   }
 }
 
