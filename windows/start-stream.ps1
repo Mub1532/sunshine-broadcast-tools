@@ -153,16 +153,15 @@ if (-not (Test-SunshineReady)) {
 Start-Hidden 'broadcast.ps1' 'guard -session'
 if (-not $isCasting) { Wait-Until { Test-OverlayReady } 20 | Out-Null }
 
-# recording starts here, once the stream and the camera box are actually up, not when the button was first pressed
+$progressForm.Close()
+$startingSignal.Dispose()
+# the teacher reads "stream is running" and clicks OK; recording only begins after that, so it starts when he's ready to speak
+Show-Message $readyMessage | Out-Null
+
 if ($wantsRecording) {
   Start-Hidden 'record.ps1'
   $recordingStarted = Get-Date
-}
-
-# the recorder gets time to come up. if it didn't, say so, because the stream itself carries on fine without it
-$recordingFailed = $false
-if ($wantsRecording) {
-  # waits until it's recording, or until it has clearly given up (it has had 10 seconds and is no longer running)
+  # give the recorder a moment to come up; if it didn't, say so - the stream itself carries on fine without it
   Wait-Until {
     $recordReady = $null
     $recordLock = $null
@@ -170,10 +169,7 @@ if ($wantsRecording) {
     (((Get-Date) - $recordingStarted).TotalSeconds -gt 10 -and -not [System.Threading.Mutex]::TryOpenExisting($recordLockName, [ref]$recordLock))
   } 45 | Out-Null
   $recordReady = $null
-  $recordingFailed = -not [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady)
+  if (-not [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady)) {
+    Show-Message $messageConfig.recordFailed 'Warning' | Out-Null
+  }
 }
-
-$progressForm.Close()
-$startingSignal.Dispose()
-if ($recordingFailed) { Show-Message $messageConfig.recordFailed 'Warning' | Out-Null }
-Show-Message $readyMessage | Out-Null
