@@ -184,43 +184,48 @@ function Finish-Recordings {
 
   if (-not (Test-Path $ffmpegPath)) { Write-RecordLog 'ffmpeg missing, left the pieces in the sections folder'; return }
 
-  # ffmpeg encoder for the re-stitch - chip first, processor as fallback
-  $q = $config.quality
-  $joinEnc =
-    if     ($graphics -match 'NVIDIA')     { "h264_nvenc -rc constqp -qp $q" }
-    elseif ($graphics -match 'AMD|Radeon') { "h264_amf -rc cqp -qp_i $q -qp_p $q -qp_b $q" }
-    elseif ($graphics -match 'Intel')      { "h264_qsv -global_quality $q" }
-    else                                   { "libx264 -preset veryfast -crf $q" }
-
   $joinPath = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))-$((Get-Date).ToString('HH.mm'))_full.mkv"
   Remove-Item $joinPath -ErrorAction SilentlyContinue
 
-  $inputs = ($parts | ForEach-Object { "-i `"$_`"" }) -join ' '
-  $streams = (0..($parts.Count - 1) | ForEach-Object { "[$_`:v][$_`:a]" }) -join ''
-  $filter = "${streams}concat=n=$($parts.Count):v=1:a=1[v][a]"
-  $joinArgs = "-y -hide_banner -loglevel error $inputs -filter_complex `"$filter`" -map `"[v]`" -map `"[a]`" " +
-    "-c:v $joinEnc -pix_fmt yuv420p -c:a aac -b:a $($config.soundKbps)k `"$joinPath`""
+  # lossless join, no re-encode so it's near-instant even for a long recording: remux each piece to MPEG-TS (which carries
+  # clean, continuous timestamps - the thing a plain mkv copy got wrong), then copy-join the TS pieces back into one mkv
+  $ok = $true
+  $tsFiles = @()
+  foreach ($part in $parts) {
+    $ts = "$part.ts"
+    if ((Invoke-Ffmpeg "-y -hide_banner -loglevel error -i `"$part`" -c copy -bsf:v h264_mp4toannexb `"$ts`"") -ne 0 -or -not (Test-Path $ts)) { $ok = $false; break }
+    $tsFiles += $ts
+  }
+  if ($ok) {
+    $concat = 'concat:' + ($tsFiles -join '|')
+    if ((Invoke-Ffmpeg "-y -hide_banner -loglevel error -i `"$concat`" -c copy -bsf:a aac_adtstoasc `"$joinPath`"") -ne 0) { $ok = $false }
+  }
+  foreach ($ts in $tsFiles) { Remove-Item $ts -Force -ErrorAction SilentlyContinue }
 
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $ffmpegPath
-  $psi.Arguments = $joinArgs
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $join = [System.Diagnostics.Process]::Start($psi)
-  if ($join) { $join.WaitForExit() }
-
-  $largestPart = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Maximum).Maximum
+  # copying is lossless, so a complete join is about the size of all the pieces together
+  $totalParts = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
   $joinSize = if (Test-Path $joinPath) { (Get-Item $joinPath).Length } else { 0 }
-  Write-RecordLog "join: largest piece $([math]::Round($largestPart / 1MB)) MB, joined $([math]::Round($joinSize / 1MB)) MB"
-  # a full re-encode of every piece is always bigger than any single piece; if it isn't, the join came out short so keep the pieces
-  if ($join -and $join.ExitCode -eq 0 -and $joinSize -ge $largestPart) {
+  Write-RecordLog "join: pieces total $([math]::Round($totalParts / 1MB)) MB, joined $([math]::Round($joinSize / 1MB)) MB"
+  if ($ok -and $joinSize -ge $totalParts * 0.9) {
     Remove-Item $sectionsFolder -Recurse -Force -ErrorAction SilentlyContinue
     Write-RecordLog "joined $($parts.Count) pieces into $joinPath, sections folder removed"
   }
   else {
     Remove-Item $joinPath -ErrorAction SilentlyContinue
-    Write-RecordLog "join failed (exit $(if ($join) { $join.ExitCode } else { 'not started' })), kept the pieces in $sectionsFolder"
+    Write-RecordLog "join failed, kept the pieces in $sectionsFolder"
   }
+}
+
+# runs ffmpeg hidden and waits, returning its exit code
+function Invoke-Ffmpeg([string]$arguments) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $ffmpegPath
+  $psi.Arguments = $arguments
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $p = [System.Diagnostics.Process]::Start($psi)
+  $p.WaitForExit()
+  return $p.ExitCode
 }
 
 $working = $null
