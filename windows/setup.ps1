@@ -615,6 +615,8 @@ function Get-FfmpegUrl {
 
 function Install-BroadcastComponents {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # without this, PowerShell's progress bar makes big downloads (ffmpeg is ~100 MB) crawl and look frozen
+  $ProgressPreference = 'SilentlyContinue'
   $downloadDir = Join-Path $env:TEMP 'sunshine-broadcast-components'
   Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
   New-Item $downloadDir -ItemType Directory | Out-Null
