@@ -73,6 +73,9 @@ switch ($action) {
       exit 10
     }
     if (-not $isCasting) {
+      # make sure Windows has the microphone at full volume and unmuted, so it's loud enough in the stream
+      & $svclPath /Unmute $deviceConfig.microphone
+      & $svclPath /SetVolume $deviceConfig.microphone 100
       & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
       # the mixer sends the microphone and the laptop sound. if it can't start, the microphone goes the old way through windows
       & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int](-not (Start-AudioMix)))
