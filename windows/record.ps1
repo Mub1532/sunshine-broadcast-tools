@@ -33,11 +33,16 @@ $folder = Join-Path ([Environment]::GetFolderPath('MyVideos')) 'Sunshine Broadca
 New-Item $folder -ItemType Directory -Force | Out-Null
 $scriptStarted = Get-Date
 
-# picks the name for the next file from the time right now
+# while recording, the pieces live in a dated "_sections" folder. at the end, a single recording moves out as one file and
+# the folder is removed; several pieces are joined into a "_full" file and the folder is removed only if that join worked
+$sectionsFolder = Join-Path $folder "SBT_Recording_$($scriptStarted.ToString('dd-MM-yyyy_HH.mm'))_sections"
+
+# picks the name for the next piece from the time right now
 function Set-RecordingPath {
+  New-Item $sectionsFolder -ItemType Directory -Force | Out-Null
   $baseName = "SBT_Recording_$((Get-Date).ToString('dd-MM-yyyy_HH.mm'))"
-  $script:filePath = Join-Path $folder "$baseName.mkv"
-  for ($copy = 2; Test-Path $script:filePath; $copy++) { $script:filePath = Join-Path $folder "${baseName}_$copy.mkv" }
+  $script:filePath = Join-Path $sectionsFolder "$baseName.mkv"
+  for ($copy = 2; Test-Path $script:filePath; $copy++) { $script:filePath = Join-Path $sectionsFolder "${baseName}_$copy.mkv" }
 }
 Set-RecordingPath
 
@@ -147,7 +152,7 @@ $script:segments = @()
 # finishes the file properly and adds the time it ended to its name
 function Complete-Recording {
   [Recorder]::Stop()
-  $finalPath = Join-Path $folder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
+  $finalPath = Join-Path $sectionsFolder "$([System.IO.Path]::GetFileNameWithoutExtension($filePath))-$((Get-Date).ToString('HH.mm')).mkv"
   try {
     Rename-Item $filePath $finalPath -ErrorAction Stop
     $script:segments += $finalPath
@@ -163,9 +168,21 @@ function Complete-Recording {
 # FILTER (it decodes and re-joins with fresh timestamps, so there's no frozen gap at the joins the way a plain copy gives).
 # the graphics chip re-encodes it, fast, since the stream has ended. pieces are only deleted once the joined file is really
 # there; if the join fails or a crash skips it, the pieces stay as separate playable files - nothing is ever lost.
-function Join-Recordings {
+function Finish-Recordings {
   $parts = @($script:segments | Where-Object { Test-Path $_ })
-  if ($parts.Count -le 1 -or -not (Test-Path $ffmpegPath)) { return }
+
+  # nothing recorded - just clear the empty folder
+  if ($parts.Count -eq 0) { Remove-Item $sectionsFolder -Recurse -Force -ErrorAction SilentlyContinue; return }
+
+  # a single recording (no pause): move it out as one file and remove the sections folder
+  if ($parts.Count -eq 1) {
+    Move-Item $parts[0] (Join-Path $folder (Split-Path $parts[0] -Leaf)) -Force -ErrorAction SilentlyContinue
+    Remove-Item $sectionsFolder -Recurse -Force -ErrorAction SilentlyContinue
+    Write-RecordLog 'one recording, moved out of the sections folder'
+    return
+  }
+
+  if (-not (Test-Path $ffmpegPath)) { Write-RecordLog 'ffmpeg missing, left the pieces in the sections folder'; return }
 
   # ffmpeg encoder for the re-stitch - chip first, processor as fallback
   $q = $config.quality
@@ -197,12 +214,12 @@ function Join-Recordings {
   Write-RecordLog "join: largest piece $([math]::Round($largestPart / 1MB)) MB, joined $([math]::Round($joinSize / 1MB)) MB"
   # a full re-encode of every piece is always bigger than any single piece; if it isn't, the join came out short so keep the pieces
   if ($join -and $join.ExitCode -eq 0 -and $joinSize -ge $largestPart) {
-    foreach ($part in $parts) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
-    Write-RecordLog "joined $($parts.Count) pieces into $joinPath, pieces deleted"
+    Remove-Item $sectionsFolder -Recurse -Force -ErrorAction SilentlyContinue
+    Write-RecordLog "joined $($parts.Count) pieces into $joinPath, sections folder removed"
   }
   else {
     Remove-Item $joinPath -ErrorAction SilentlyContinue
-    Write-RecordLog "join failed (exit $(if ($join) { $join.ExitCode } else { 'not started' })), kept the pieces as separate files"
+    Write-RecordLog "join failed (exit $(if ($join) { $join.ExitCode } else { 'not started' })), kept the pieces in $sectionsFolder"
   }
 }
 
@@ -232,7 +249,7 @@ while (-not $stopSignal.WaitOne(200)) {
   # every ~5 seconds, stop cleanly if the disk is nearly full so it never fills up. the stream itself carries on
   if ($recordingNow -and ++$spaceChecks % 25 -eq 0 -and (Get-FreeGB $folder) -lt $config.keepFreeGB) {
     Complete-Recording
-    Join-Recordings
+    Finish-Recordings
     Write-RecordLog 'stopped because the disk is nearly full'
     Show-Message (Format-Text $messageConfig.recordStoppedSpace @{ need = $config.keepFreeGB }) 'Warning' | Out-Null
     [Environment]::Exit(0)
@@ -264,7 +281,7 @@ while (-not $stopSignal.WaitOne(200)) {
   if ($seconds -gt 0 -and ((Get-Date) - $scriptStarted).TotalSeconds -ge $seconds) { break }
 }
 if ($recordingNow) { Complete-Recording }
-Join-Recordings
+Finish-Recordings
 # a short path for the popup, eg "Videos\Sunshine Broadcast Tools" instead of the full C:\Users\... path
 $shortFolder = $folder.Replace("$env:USERPROFILE\", '')
 Show-Message (Format-Text $messageConfig.recordSaved @{ folder = $shortFolder }) | Out-Null
