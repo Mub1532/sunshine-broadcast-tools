@@ -17,6 +17,19 @@ $config = @{
 
 $audioDevice = 'CABLE Output (VB-Audio Virtual Cable)'
 
+# the graphics chip compresses the recording (fast and smooth, same as the stream uses). the processor is the last resort.
+# the stream already proves the chip can encode while streaming, so recording on it too is fine and far smoother than the cpu
+$graphics = (Get-CimInstance Win32_VideoController).Name -join ', '
+$q = $config.quality
+$gpuVideoArgs =
+  if     ($graphics -match 'NVIDIA')     { "-c:v h264_nvenc -rc constqp -qp $q" }
+  elseif ($graphics -match 'AMD|Radeon') { "-c:v h264_amf -rc cqp -qp_i $q -qp_p $q -qp_b $q" }
+  elseif ($graphics -match 'Intel')      { "-c:v h264_qsv -global_quality $q" }
+  else                                   { '' }
+$cpuVideoArgs = "-c:v libx264 -preset $($config.preset) -crf $q"
+# the chip's encoder first, the processor only if there's no chip encoder or it won't start
+$script:videoArgs = if ($gpuVideoArgs) { $gpuVideoArgs } else { $cpuVideoArgs }
+
 $recordLock = New-Object System.Threading.Mutex($false, $recordLockName)
 if (-not $recordLock.WaitOne(0)) { exit }
 
@@ -69,7 +82,7 @@ function Start-FfmpegPiece {
   $arguments = '-y -hide_banner -loglevel error -nostats ' +
     "-f lavfi -i ddagrab=framerate=$fps,hwdownload,format=bgra " +
     "-f dshow -i `"audio=$audioDevice`" " +
-    "-c:v libx264 -preset $($config.preset) -crf $($config.quality) -pix_fmt yuv420p " +
+    "$script:videoArgs -pix_fmt yuv420p " +
     "-fps_mode cfr -r $fps " +
     "-c:a aac -b:a $($config.soundKbps)k " +
     "`"$filePath`""
@@ -195,6 +208,12 @@ function Start-LibmpvPiece {
 function Start-Segment {
   if ($script:engine -eq 'ffmpeg') {
     if (Start-FfmpegPiece) { return $true }
+    # if the graphics-chip encoder wouldn't start, drop to the processor encoder before giving up on ffmpeg
+    if ($script:videoArgs -ne $cpuVideoArgs) {
+      Write-RecordLog 'ffmpeg graphics-chip encoder failed, trying the processor encoder'
+      $script:videoArgs = $cpuVideoArgs
+      if (Start-FfmpegPiece) { return $true }
+    }
     Write-RecordLog 'ffmpeg recording failed, falling back to libmpv'
     if (Initialize-Libmpv) { $script:engine = 'libmpv' } else { return $false }
   }
