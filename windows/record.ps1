@@ -70,6 +70,7 @@ function Start-FfmpegPiece {
     "-f lavfi -i ddagrab=framerate=$fps,hwdownload,format=bgra " +
     "-f dshow -i `"audio=$audioDevice`" " +
     "-c:v libx264 -preset $($config.preset) -crf $($config.quality) -pix_fmt yuv420p " +
+    "-fps_mode cfr -r $fps " +
     "-c:a aac -b:a $($config.soundKbps)k " +
     "`"$filePath`""
   $script:ffProc = Start-FfmpegProcess $arguments $true
@@ -226,9 +227,10 @@ function Complete-Recording {
   }
 }
 
-# when a clean end leaves more than one piece (from pausing), ffmpeg joins them into one file without re-encoding.
-# the pieces are never deleted: once the join is written they're moved into a "pieces" backup subfolder so only the
-# joined file shows. if ffmpeg isn't there, or a crash skips this, the pieces just stay as separate playable files.
+# when a clean end leaves more than one piece (from pausing), ffmpeg joins them into one "_full" file without re-encoding,
+# then deletes the pieces so only the one file is left. the pieces are only deleted when the joined file came out complete
+# (about the size of all the pieces together, since copying is lossless). if the join fails, or a crash skips this, the
+# pieces just stay in the folder as separate playable files - nothing is ever lost.
 function Join-Recordings {
   $parts = @($script:segments | Where-Object { Test-Path $_ })
   if ($parts.Count -le 1 -or -not (Test-Path $ffmpegPath)) { return }
@@ -244,11 +246,11 @@ function Join-Recordings {
   if ($join) { $join.WaitForExit() }
   Remove-Item $listPath -ErrorAction SilentlyContinue
 
-  if ($join -and $join.ExitCode -eq 0 -and (Test-Path $joinPath) -and (Get-Item $joinPath).Length -gt 0) {
-    $pieceFolder = Join-Path $folder 'pieces'
-    New-Item $pieceFolder -ItemType Directory -Force | Out-Null
-    foreach ($part in $parts) { Move-Item $part $pieceFolder -Force -ErrorAction SilentlyContinue }
-    Write-RecordLog "joined $($parts.Count) pieces into $joinPath, originals moved to $pieceFolder"
+  $totalParts = ($parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
+  $joinSize = if (Test-Path $joinPath) { (Get-Item $joinPath).Length } else { 0 }
+  if ($join -and $join.ExitCode -eq 0 -and $joinSize -ge $totalParts * 0.9) {
+    foreach ($part in $parts) { Remove-Item $part -Force -ErrorAction SilentlyContinue }
+    Write-RecordLog "joined $($parts.Count) pieces into $joinPath, pieces deleted"
   }
   else {
     Remove-Item $joinPath -ErrorAction SilentlyContinue
