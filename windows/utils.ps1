@@ -18,6 +18,7 @@ $null = Register-EngineEvent PowerShell.Exiting -MessageData @{ log = $debugLogP
 $appDir = $PSScriptRoot
 $svclPath = Join-Path $appDir 'svcl.exe'
 $libmpvPath = Join-Path $appDir 'libmpv-2.dll'
+$ffmpegPath = Join-Path $appDir 'ffmpeg.exe'
 $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent

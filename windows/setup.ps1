@@ -600,6 +600,19 @@ function Get-LibmpvUrl {
   throw 'Could not find the latest libmpv download.'
 }
 
+function Get-FfmpegUrl {
+  try {
+    $release = Invoke-RestMethod 'https://api.github.com/repos/GyanD/codexffmpeg/releases/latest' -UseBasicParsing
+    $url = ($release.assets | Where-Object name -match '^ffmpeg-.+-essentials_build\.zip$' | Select-Object -First 1).browser_download_url
+    if ($url) { return $url }
+  }
+  catch {}
+  $latestPage = Invoke-WebRequest 'https://github.com/GyanD/codexffmpeg/releases/latest' -UseBasicParsing
+  $tag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
+  if ($tag) { return "https://github.com/GyanD/codexffmpeg/releases/download/$tag/ffmpeg-$tag-essentials_build.zip" }
+  throw 'Could not find the latest ffmpeg download.'
+}
+
 function Install-BroadcastComponents {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   $downloadDir = Join-Path $env:TEMP 'sunshine-broadcast-components'
@@ -618,7 +631,12 @@ function Install-BroadcastComponents {
       if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
       Copy-Item (Get-ChildItem "$downloadDir\mpv" -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
     }
-    Unblock-File $svclPath, $libmpvPath
+    if (-not (Test-Path $ffmpegPath)) {
+      Invoke-WebRequest (Get-FfmpegUrl) -OutFile "$downloadDir\ffmpeg.zip" -UseBasicParsing
+      Expand-Archive "$downloadDir\ffmpeg.zip" "$downloadDir\ffmpeg" -Force
+      Copy-Item (Get-ChildItem "$downloadDir\ffmpeg" -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1).FullName $ffmpegPath
+    }
+    Unblock-File $svclPath, $libmpvPath, $ffmpegPath
     if (-not (Test-CableInstalled)) {
       Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$downloadDir\vbcable.zip" -UseBasicParsing
       Expand-Archive "$downloadDir\vbcable.zip" "$downloadDir\vbcable" -Force
@@ -631,7 +649,7 @@ function Install-BroadcastComponents {
   finally { Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled))) {
+if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-Path $ffmpegPath) -or -not (Test-CableInstalled))) {
   if ((Show-Choice $messageConfig.componentsNeeded @($messageConfig.componentsInstall, $messageConfig.componentsCancel)) -ne 0) { exit }
   $progressForm = Show-Progress $messageConfig.componentsInstalling
   $progressForm.TopMost = $false
