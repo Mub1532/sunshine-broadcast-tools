@@ -544,9 +544,11 @@ $markWorkingChoice = $menuChoices.Count
 $menuChoices += $scriptConfig.markWorkingButton
 $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
 if ($menuChoice -eq $originalChoice) {
-  # reinstall the known-good main at that commit (this installer supports pinning a commit), elevated, which opens its setup
+  # reinstall the known-good main at that commit (this installer supports pinning a commit), elevated, which opens its setup.
+  # everything is logged to revert.log and the window is kept open on an error so the reason can be read
   $installScript = Join-Path $appDir 'install.ps1'
-  $inner = "`$sbtCommit = '$originalCommit'; & '$installScript'"
+  $logPath = Join-Path $env:ProgramData 'sbt-revert.log'
+  $inner = "try { Start-Transcript -Path '$logPath' -Force } catch {}; try { `$sbtCommit = '$originalCommit'; & '$installScript' } catch { Write-Host `$_ -ForegroundColor Red; Write-Host 'Press Enter to close'; Read-Host }; try { Stop-Transcript } catch {}"
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
   Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded" -Verb RunAs
   exit
