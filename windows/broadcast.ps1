@@ -49,10 +49,11 @@ function Start-AudioMix {
 
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
-  Remove-Item $streamActivePath -ErrorAction SilentlyContinue
-  if (-not $isCasting) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0 }
+  # tell the recorder to stop first, so its "saving..." popup shows straight away, before the slower teardown below
   $recordStop = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($recordStopName, [ref]$recordStop)) { [void]$recordStop.Set() }
+  Remove-Item $streamActivePath -ErrorAction SilentlyContinue
+  if (-not $isCasting) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0 }
   $mixStop = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($audioMixStopName, [ref]$mixStop)) { [void]$mixStop.Set() }
   $overlayClose = $null
