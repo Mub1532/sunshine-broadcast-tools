@@ -60,6 +60,15 @@ function Format-Text([string]$template, [hashtable]$values) {
 }
 
 # free space in GB on the drive a path lives on. returns infinity if it can't be read, so a failed check never blocks recording
+# wipes the debug log so each stream starts with a clean one instead of piling up across sessions forever
+function Reset-DebugLog {
+  try {
+    New-Item (Split-Path $debugLogPath) -ItemType Directory -Force | Out-Null
+    Set-Content $debugLogPath "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  --- new session ---" -Encoding UTF8
+  }
+  catch {}
+}
+
 function Get-FreeGB([string]$path) {
   try { return (New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))).AvailableFreeSpace / 1GB }
   catch { return [double]::PositiveInfinity }

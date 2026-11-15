@@ -4,6 +4,7 @@ param([switch]$skipUpdateCheck)
 
 . "$PSScriptRoot\utils.ps1"
 Enable-SharpText
+Reset-DebugLog
 
 if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
   Show-Message $messageConfig.sunshineMissing 'Error' | Out-Null
