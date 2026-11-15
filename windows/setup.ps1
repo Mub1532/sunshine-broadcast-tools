@@ -600,6 +600,14 @@ function Get-LibmpvUrl {
   throw 'Could not find the latest libmpv download.'
 }
 
+# PowerShell's Invoke-WebRequest is slow even on a fast line; WebClient streams straight to disk at full speed
+function Save-Download([string]$url, [string]$path) {
+  $client = New-Object System.Net.WebClient
+  $client.Headers.Add('User-Agent', 'Mozilla/5.0')
+  try { $client.DownloadFile($url, $path) }
+  finally { $client.Dispose() }
+}
+
 function Get-FfmpegUrl {
   try {
     $release = Invoke-RestMethod 'https://api.github.com/repos/GyanD/codexffmpeg/releases/latest' -UseBasicParsing
@@ -622,25 +630,25 @@ function Install-BroadcastComponents {
   New-Item $downloadDir -ItemType Directory | Out-Null
   try {
     if (-not (Test-Path $svclPath)) {
-      Invoke-WebRequest 'https://www.nirsoft.net/utils/svcl-x64.zip' -OutFile "$downloadDir\svcl.zip" -UseBasicParsing
+      Save-Download 'https://www.nirsoft.net/utils/svcl-x64.zip' "$downloadDir\svcl.zip"
       Expand-Archive "$downloadDir\svcl.zip" "$downloadDir\svcl" -Force
       Copy-Item "$downloadDir\svcl\svcl.exe" $svclPath
     }
     if (-not (Test-Path $libmpvPath)) {
-      Invoke-WebRequest (Get-LibmpvUrl) -OutFile "$downloadDir\mpv.7z" -UseBasicParsing
+      Save-Download (Get-LibmpvUrl) "$downloadDir\mpv.7z"
       New-Item "$downloadDir\mpv" -ItemType Directory | Out-Null
       tar.exe -xf "$downloadDir\mpv.7z" -C "$downloadDir\mpv"
       if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
       Copy-Item (Get-ChildItem "$downloadDir\mpv" -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
     }
     if (-not (Test-Path $ffmpegPath)) {
-      Invoke-WebRequest (Get-FfmpegUrl) -OutFile "$downloadDir\ffmpeg.zip" -UseBasicParsing
+      Save-Download (Get-FfmpegUrl) "$downloadDir\ffmpeg.zip"
       Expand-Archive "$downloadDir\ffmpeg.zip" "$downloadDir\ffmpeg" -Force
       Copy-Item (Get-ChildItem "$downloadDir\ffmpeg" -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1).FullName $ffmpegPath
     }
     Unblock-File $svclPath, $libmpvPath, $ffmpegPath
     if (-not (Test-CableInstalled)) {
-      Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$downloadDir\vbcable.zip" -UseBasicParsing
+      Save-Download 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' "$downloadDir\vbcable.zip"
       Expand-Archive "$downloadDir\vbcable.zip" "$downloadDir\vbcable" -Force
       Start-Process "$downloadDir\vbcable\VBCABLE_Setup_x64.exe" -WorkingDirectory "$downloadDir\vbcable" -Wait
       if (Test-CableInstalled) { return 'restart' }
