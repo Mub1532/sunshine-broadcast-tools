@@ -4,7 +4,7 @@
   "castingSetupTitle": "Sunshine Broadcast Setup: Casting",
   "castingDescription": "Shows your screen and the computer's sound on the TV. No camera or mic.",
   "appName": "Desktop Broadcast",
-  "messagesNote": "Note: If you want to change the error messages, its in messageConfig.json",
+  "messagesNote": "Note: To change any popup text, put the ones you want to change in customMessages.json (next to messageConfig.json). That way your changes stay when the app updates.",
 
   "speakersLabel": "Speakers (plays sound on this computer):",
   "microphoneLabel": "Microphone (sent to the stream):",
