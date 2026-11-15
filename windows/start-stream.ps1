@@ -4,6 +4,7 @@ param([switch]$skipUpdateCheck)
 
 . "$PSScriptRoot\utils.ps1"
 Enable-SharpText
+Reset-DebugLog
 
 if (-not (Get-Service $serviceName -ErrorAction SilentlyContinue)) {
   Show-Message $messageConfig.sunshineMissing 'Error' | Out-Null
@@ -112,11 +113,27 @@ if (-not $isCasting) {
 }
 
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay)\.ps1|broadcast\.ps1"? guard' } |
+  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '(end-button|webcam-overlay|audio-mix|record)\.ps1|broadcast\.ps1"? guard' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-CimInstance Win32_Process -Filter "Name='Sunshine Broadcast Tools.exe'" -ErrorAction SilentlyContinue |
   Where-Object CommandLine -match '--tray' |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+# recording is only for broadcast. the question is asked now, but it doesn't actually start until the stream is up
+$wantsRecording = $false
+if (-not $isCasting) {
+  $progressForm.Hide()
+  $wantsRecording = (Show-Message $messageConfig.recordAsk 'Question' 'YesNo') -eq 'Yes'
+  $progressForm.Show()
+  Show-OnTop $progressForm
+  if ($wantsRecording -and (Get-FreeGB ([Environment]::GetFolderPath('MyVideos'))) -lt 5) {
+    $progressForm.Hide()
+    Show-Message (Format-Text $messageConfig.recordNoSpace @{ need = 5 }) 'Warning' | Out-Null
+    $progressForm.Show()
+    Show-OnTop $progressForm
+    $wantsRecording = $false
+  }
+}
 
 & (Join-Path $appDir 'broadcast.ps1') start
 if (-not $isCasting) { Start-Hidden 'webcam-overlay.ps1' }
@@ -138,4 +155,21 @@ if (-not $isCasting) { Wait-Until { Test-OverlayReady } 20 | Out-Null }
 
 $progressForm.Close()
 $startingSignal.Dispose()
+# the teacher reads "stream is running" and clicks OK; recording only begins after that, so it starts when he's ready to speak
 Show-Message $readyMessage | Out-Null
+
+if ($wantsRecording) {
+  Start-Hidden 'record.ps1'
+  $recordingStarted = Get-Date
+  # give the recorder a moment to come up; if it didn't, say so - the stream itself carries on fine without it
+  Wait-Until {
+    $recordReady = $null
+    $recordLock = $null
+    [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady) -or
+    (((Get-Date) - $recordingStarted).TotalSeconds -gt 10 -and -not [System.Threading.Mutex]::TryOpenExisting($recordLockName, [ref]$recordLock))
+  } 45 | Out-Null
+  $recordReady = $null
+  if (-not [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady)) {
+    Show-Message $messageConfig.recordFailed 'Warning' | Out-Null
+  }
+}

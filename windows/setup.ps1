@@ -529,17 +529,30 @@ if ($applyFrom -or $repair) {
 $setupShown = $null
 if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\SunshineBroadcastSetupShown', [ref]$setupShown)) { [void]$setupShown.Set() }
 $restoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup\restore.ps1'
-$originalRestoreScript = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-orig\restore.ps1'
 $lastWorkingDir = Join-Path $env:ProgramData 'sunshine-broadcast-tools-backup-last-working'
 $lastWorkingRestoreScript = Join-Path $lastWorkingDir 'restore.ps1'
+# the last known-good main, from before the disconnect-notice/messageConfig change that broke run-hidden on some laptops
+$originalCommit = '34d3b6527894f134c63081d5dd4543d20f4a09ca'
 $menuChoices = @($scriptConfig.broadcastSetupButton, $scriptConfig.castingSetupButton)
 $restoreChoices = @{}
 if (Test-Path $restoreScript) { $restoreChoices[$menuChoices.Count] = $restoreScript; $menuChoices += $scriptConfig.undoButton }
-if (Test-Path $originalRestoreScript) { $restoreChoices[$menuChoices.Count] = $originalRestoreScript; $menuChoices += $scriptConfig.undoOriginalButton }
+# revert to original is always offered: it reinstalls that known-good main and then opens its setup
+$originalChoice = $menuChoices.Count
+$menuChoices += $scriptConfig.undoOriginalButton
 if (Test-Path $lastWorkingRestoreScript) { $restoreChoices[$menuChoices.Count] = $lastWorkingRestoreScript; $menuChoices += $scriptConfig.undoLastWorkingButton }
 $markWorkingChoice = $menuChoices.Count
 $menuChoices += $scriptConfig.markWorkingButton
 $menuChoice = Show-Choice $scriptConfig.setupMenuText $menuChoices
+if ($menuChoice -eq $originalChoice) {
+  # reinstall the known-good main at that commit (this installer supports pinning a commit), elevated, which opens its setup.
+  # everything is logged to revert.log and the window is kept open on an error so the reason can be read
+  $installScript = Join-Path $appDir 'install.ps1'
+  $logPath = Join-Path $env:ProgramData 'sbt-revert.log'
+  $inner = "try { Start-Transcript -Path '$logPath' -Force } catch {}; try { `$sbtCommit = '$originalCommit'; & '$installScript' } catch { Write-Host `$_ -ForegroundColor Red; Write-Host 'Press Enter to close'; Read-Host }; try { Stop-Transcript } catch {}"
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+  Start-Process powershell "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded" -Verb RunAs
+  exit
+}
 if ($menuChoice -eq $markWorkingChoice) {
   try {
     Remove-Item $lastWorkingDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -600,27 +613,55 @@ function Get-LibmpvUrl {
   throw 'Could not find the latest libmpv download.'
 }
 
+# PowerShell's Invoke-WebRequest is slow even on a fast line; WebClient streams straight to disk at full speed
+function Save-Download([string]$url, [string]$path) {
+  $client = New-Object System.Net.WebClient
+  $client.Headers.Add('User-Agent', 'Mozilla/5.0')
+  try { $client.DownloadFile($url, $path) }
+  finally { $client.Dispose() }
+}
+
+function Get-FfmpegUrl {
+  try {
+    $release = Invoke-RestMethod 'https://api.github.com/repos/GyanD/codexffmpeg/releases/latest' -UseBasicParsing
+    $url = ($release.assets | Where-Object name -match '^ffmpeg-.+-essentials_build\.zip$' | Select-Object -First 1).browser_download_url
+    if ($url) { return $url }
+  }
+  catch {}
+  $latestPage = Invoke-WebRequest 'https://github.com/GyanD/codexffmpeg/releases/latest' -UseBasicParsing
+  $tag = ($latestPage.BaseResponse.ResponseUri.AbsoluteUri -split '/tag/')[-1]
+  if ($tag) { return "https://github.com/GyanD/codexffmpeg/releases/download/$tag/ffmpeg-$tag-essentials_build.zip" }
+  throw 'Could not find the latest ffmpeg download.'
+}
+
 function Install-BroadcastComponents {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # without this, PowerShell's progress bar makes big downloads (ffmpeg is ~100 MB) crawl and look frozen
+  $ProgressPreference = 'SilentlyContinue'
   $downloadDir = Join-Path $env:TEMP 'sunshine-broadcast-components'
   Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
   New-Item $downloadDir -ItemType Directory | Out-Null
   try {
     if (-not (Test-Path $svclPath)) {
-      Invoke-WebRequest 'https://www.nirsoft.net/utils/svcl-x64.zip' -OutFile "$downloadDir\svcl.zip" -UseBasicParsing
+      Save-Download 'https://www.nirsoft.net/utils/svcl-x64.zip' "$downloadDir\svcl.zip"
       Expand-Archive "$downloadDir\svcl.zip" "$downloadDir\svcl" -Force
       Copy-Item "$downloadDir\svcl\svcl.exe" $svclPath
     }
     if (-not (Test-Path $libmpvPath)) {
-      Invoke-WebRequest (Get-LibmpvUrl) -OutFile "$downloadDir\mpv.7z" -UseBasicParsing
+      Save-Download (Get-LibmpvUrl) "$downloadDir\mpv.7z"
       New-Item "$downloadDir\mpv" -ItemType Directory | Out-Null
       tar.exe -xf "$downloadDir\mpv.7z" -C "$downloadDir\mpv"
       if ($LASTEXITCODE) { throw 'Could not extract libmpv (needs Windows 11).' }
       Copy-Item (Get-ChildItem "$downloadDir\mpv" -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1).FullName $libmpvPath
     }
-    Unblock-File $svclPath, $libmpvPath
+    if (-not (Test-Path $ffmpegPath)) {
+      Save-Download (Get-FfmpegUrl) "$downloadDir\ffmpeg.zip"
+      Expand-Archive "$downloadDir\ffmpeg.zip" "$downloadDir\ffmpeg" -Force
+      Copy-Item (Get-ChildItem "$downloadDir\ffmpeg" -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1).FullName $ffmpegPath
+    }
+    Unblock-File $svclPath, $libmpvPath, $ffmpegPath
     if (-not (Test-CableInstalled)) {
-      Invoke-WebRequest 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' -OutFile "$downloadDir\vbcable.zip" -UseBasicParsing
+      Save-Download 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip' "$downloadDir\vbcable.zip"
       Expand-Archive "$downloadDir\vbcable.zip" "$downloadDir\vbcable" -Force
       Start-Process "$downloadDir\vbcable\VBCABLE_Setup_x64.exe" -WorkingDirectory "$downloadDir\vbcable" -Wait
       if (Test-CableInstalled) { return 'restart' }
@@ -631,7 +672,7 @@ function Install-BroadcastComponents {
   finally { Remove-Item $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-CableInstalled))) {
+if ($mode -eq 'broadcast' -and (-not (Test-Path $svclPath) -or -not (Test-Path $libmpvPath) -or -not (Test-Path $ffmpegPath) -or -not (Test-CableInstalled))) {
   if ((Show-Choice $messageConfig.componentsNeeded @($messageConfig.componentsInstall, $messageConfig.componentsCancel)) -ne 0) { exit }
   $progressForm = Show-Progress $messageConfig.componentsInstalling
   $progressForm.TopMost = $false

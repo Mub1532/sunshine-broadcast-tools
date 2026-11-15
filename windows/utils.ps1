@@ -18,16 +18,24 @@ $null = Register-EngineEvent PowerShell.Exiting -MessageData @{ log = $debugLogP
 $appDir = $PSScriptRoot
 $svclPath = Join-Path $appDir 'svcl.exe'
 $libmpvPath = Join-Path $appDir 'libmpv-2.dll'
+$ffmpegPath = Join-Path $appDir 'ffmpeg.exe'
 $deviceConfigPath = Join-Path $appDir 'deviceConfig.json'
 
 $repoDir = Split-Path $appDir -Parent
 $scriptConfig = Get-Content (Join-Path $repoDir 'scriptConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$messagesPath = Join-Path $repoDir 'messageConfig.json'
-$defaultMessagesPath = Join-Path $repoDir 'messageConfig.default.json'
-if (-not (Test-Path $messagesPath) -and (Test-Path $defaultMessagesPath)) {
-  try { Copy-Item $defaultMessagesPath $messagesPath } catch {}
+# messageConfig.json is the default (always fresh from the repo). customMessages.json is optional: any keys in it override
+# the matching defaults, so new default messages still arrive on update and only the keys you chose to change are replaced.
+$messageConfig = Get-Content (Join-Path $repoDir 'messageConfig.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$customMessagesPath = Join-Path $repoDir 'customMessages.json'
+if (Test-Path $customMessagesPath) {
+  try {
+    $customMessages = Get-Content $customMessagesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($p in $customMessages.PSObject.Properties) {
+      $messageConfig | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
+    }
+  }
+  catch {}
 }
-$messageConfig = Get-Content $(if (Test-Path $messagesPath) { $messagesPath } else { $defaultMessagesPath }) -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $serviceName = 'SunshineService'
 $sunshineConfigDir = Join-Path $env:ProgramFiles 'Sunshine\config'
@@ -37,6 +45,14 @@ $sessionLockName = 'Local\SunshineBroadcastSession'
 $overlayReadyName = 'Local\SunshineBroadcastOverlayReady'
 $overlayCloseName = 'Local\SunshineBroadcastOverlayClose'
 $startingName = 'Local\SunshineBroadcastStarting'
+$audioMixLockName = 'Local\SunshineBroadcastAudioMix'
+$audioMixReadyName = 'Local\SunshineBroadcastAudioMixReady'
+$audioMixStopName = 'Local\SunshineBroadcastAudioMixStop'
+$audioMixMuteName = 'Local\SunshineBroadcastAudioMixMute'
+$recordLockName = 'Local\SunshineBroadcastRecord'
+$recordReadyName = 'Local\SunshineBroadcastRecordReady'
+$recordStopName = 'Local\SunshineBroadcastRecordStop'
+$recordPauseName = 'Local\SunshineBroadcastRecordPause'
 $streamActivePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\stream-active'
 $clientNamePath = Join-Path $env:LOCALAPPDATA 'sunshine-broadcast-tools\client-name'
 $versionPath = Join-Path $repoDir 'version.json'
@@ -48,6 +64,21 @@ $runnerVersion = '2.0.0.0'
 function Format-Text([string]$template, [hashtable]$values) {
   foreach ($key in $values.Keys) { $template = $template.Replace("{$key}", [string]$values[$key]) }
   $template
+}
+
+# free space in GB on the drive a path lives on. returns infinity if it can't be read, so a failed check never blocks recording
+# wipes the debug log so each stream starts with a clean one instead of piling up across sessions forever
+function Reset-DebugLog {
+  try {
+    New-Item (Split-Path $debugLogPath) -ItemType Directory -Force | Out-Null
+    Set-Content $debugLogPath "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  --- new session ---" -Encoding UTF8
+  }
+  catch {}
+}
+
+function Get-FreeGB([string]$path) {
+  try { return (New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($path))).AvailableFreeSpace / 1GB }
+  catch { return [double]::PositiveInfinity }
 }
 
 function Show-OnTop([System.Windows.Forms.Form]$form) {
@@ -257,6 +288,22 @@ function Test-Runner {
 # start command for sunshine. uses run-hidden when it works on this laptop, otherwise the old hidden powershell way
 function Get-StartCommand([bool]$runnerWorks) {
   if ($runnerWorks) { "`"$runnerPath`" broadcast.ps1 start" } else { Get-HiddenCommand 'broadcast.ps1' 'start' }
+}
+
+# true when the audio mixer is running and playing into the cable
+function Test-AudioMix {
+  $mixReady = $null
+  [System.Threading.EventWaitHandle]::TryOpenExisting($audioMixReadyName, [ref]$mixReady)
+}
+
+# turns the microphone in the stream on or off, through the mixer when it's running and through windows otherwise
+function Set-StreamMicrophone([string]$microphone, [bool]$on) {
+  $mixMute = $null
+  if ((Test-AudioMix) -and [System.Threading.EventWaitHandle]::TryOpenExisting($audioMixMuteName, [ref]$mixMute)) {
+    if ($on) { [void]$mixMute.Reset() } else { [void]$mixMute.Set() }
+    return
+  }
+  & $svclPath /SetListenToThisDevice $microphone ([int]$on)
 }
 
 function Start-Hidden([string]$script, [string]$arguments = '') {

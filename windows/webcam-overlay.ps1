@@ -135,7 +135,7 @@ public class OverlayButton : Form {
   }
   public static int Scaled(int value) { return (int)Math.Round(value * DisplayScale); }
 
-  public OverlayButton(string text, string fontName, float fontSize, Size size) {
+  public OverlayButton(string text, string fontName, float fontSize, Size padding) {
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
@@ -154,13 +154,13 @@ public class OverlayButton : Form {
     Button.Cursor = Cursors.Hand;
     Controls.Add(Button);
 
-    // scaled base size, made bigger if the text still doesnt fit
+    // sized from its own text plus a little padding, so it fits at any display scaling, font or wording
     SizeF textSize;
     using (var graphics = CreateGraphics()) textSize = graphics.MeasureString(text, Button.Font);
-    Size = new Size(
-      Math.Max(Scaled(size.Width), (int)Math.Ceiling(textSize.Width) + Scaled(12)),
-      Math.Max(Scaled(size.Height), (int)Math.Ceiling(textSize.Height) + Scaled(6)));
+    Size = new Size((int)Math.Ceiling(textSize.Width) + Scaled(padding.Width), (int)Math.Ceiling(textSize.Height) + Scaled(padding.Height));
   }
+
+  public void SetText(string text) { Button.Text = text; }
 
   public void SetLook(Color color, string tip) {
     BackColor = color;
@@ -203,7 +203,9 @@ public class OverlayForm : Form {
   readonly OverlayButton endButton;
   readonly OverlayButton cameraButton;
   readonly OverlayButton microphoneButton;
+  readonly OverlayButton recordButton;
   readonly string[] tips;
+  readonly string[] recordLabels;
   readonly string cameraName;
   readonly Timer mpvTimer = new Timer { Interval = 250 };
   IntPtr player = IntPtr.Zero;
@@ -211,16 +213,20 @@ public class OverlayForm : Form {
   bool videoDisabled;
   bool cameraOn = true;
   bool microphoneOn = true;
+  bool recordingPaused;
 
   public double AspectRatio = 16.0 / 9.0;
   public Func<bool> ShouldClose;
   public event EventHandler EndRequested;
   public event EventHandler VideoStarted;
   public Action<bool> MicrophoneToggled;
+  public Action<bool> RecordingPaused;
 
-  public OverlayForm(string cameraName, string endLabel, string[] tips) {
+  // recordLabels are the pause and resume wording for the recording button
+  public OverlayForm(string cameraName, string endLabel, string[] tips, string[] recordLabels) {
     this.cameraName = cameraName;
     this.tips = tips;
+    this.recordLabels = recordLabels;
     FormBorderStyle = FormBorderStyle.None;
     ShowInTaskbar = false;
     TopMost = true;
@@ -228,15 +234,18 @@ public class OverlayForm : Form {
     BackColor = Color.Black;
 
     string iconFont = IsFontInstalled("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
-    endButton = new OverlayButton(endLabel, "Segoe UI", 8.5f, new Size(92, 24));
-    cameraButton = new OverlayButton(CameraGlyph, iconFont, 11f, new Size(34, 30));
-    microphoneButton = new OverlayButton(MicrophoneGlyph, iconFont, 11f, new Size(34, 30));
+    endButton = new OverlayButton(endLabel, "Segoe UI", 8.5f, new Size(10, 6));
+    cameraButton = new OverlayButton(CameraGlyph, iconFont, 11f, new Size(8, 8));
+    microphoneButton = new OverlayButton(MicrophoneGlyph, iconFont, 11f, new Size(8, 8));
+    // made with whichever wording is longer so both fit, it's only shown while a recording is running
+    recordButton = new OverlayButton(recordLabels[0].Length > recordLabels[1].Length ? recordLabels[0] : recordLabels[1], "Segoe UI", 8.5f, new Size(10, 6));
     endButton.SetLook(Red, endLabel);
     UpdateToggleLooks();
 
     endButton.Button.Click += (sender, args) => { if (EndRequested != null) EndRequested(this, EventArgs.Empty); };
     cameraButton.Button.Click += (sender, args) => ToggleCamera();
     microphoneButton.Button.Click += (sender, args) => ToggleMicrophone();
+    recordButton.Button.Click += (sender, args) => ToggleRecording();
     Shown += (sender, args) => StartPlayer();
     LocationChanged += (sender, args) => PlaceButtons();
     FormClosing += (sender, args) => Hide();
@@ -257,6 +266,28 @@ public class OverlayForm : Form {
   void UpdateToggleLooks() {
     cameraButton.SetLook(cameraOn ? Grey : Red, cameraOn ? tips[0] : tips[1]);
     microphoneButton.SetLook(microphoneOn ? Grey : Red, microphoneOn ? tips[2] : tips[3]);
+  }
+
+  // the recording button follows whether a recording is running
+  public void SetRecordingAvailable(bool available) {
+    if (available == recordButton.Visible) return;
+    if (!available) { recordButton.Hide(); return; }
+    recordingPaused = false;
+    UpdateRecordLook();
+    recordButton.Show(this);
+    PlaceButtons();
+  }
+
+  void UpdateRecordLook() {
+    string label = recordingPaused ? recordLabels[1] : recordLabels[0];
+    recordButton.SetText(label);
+    recordButton.SetLook(recordingPaused ? Red : Grey, label);
+  }
+
+  void ToggleRecording() {
+    recordingPaused = !recordingPaused;
+    UpdateRecordLook();
+    if (RecordingPaused != null) RecordingPaused(recordingPaused);
   }
 
   public void ShowEndButton() {
@@ -327,6 +358,7 @@ public class OverlayForm : Form {
     endButton.Location = new Point(Right - endButton.Width - ButtonInset, Top + ButtonInset);
     cameraButton.Location = new Point(Right - cameraButton.Width - ButtonInset, Bottom - cameraButton.Height - ButtonInset);
     microphoneButton.Location = new Point(cameraButton.Left - microphoneButton.Width - ButtonGap, cameraButton.Top);
+    recordButton.Location = new Point(Left + ButtonInset, Top + ButtonInset);
   }
 
   protected override void OnPaintBackground(PaintEventArgs args) {
@@ -409,7 +441,8 @@ $overlayWidth = [int]($workArea.Width * $widthRatio)
 $overlayHeight = [int]($overlayWidth * 9 / 16)
 
 $buttonTips = [string[]]@($scriptConfig.cameraOff, $scriptConfig.cameraOn, $scriptConfig.micMute, $scriptConfig.micUnmute)
-$overlay = New-Object OverlayForm -ArgumentList ($cameraName -replace '"', ''), $scriptConfig.endButton, $buttonTips
+$recordLabels = [string[]]@($scriptConfig.pauseRecordingButton, $scriptConfig.resumeRecordingButton)
+$overlay = New-Object OverlayForm -ArgumentList ($cameraName -replace '"', ''), $scriptConfig.endButton, $buttonTips, $recordLabels
 $overlay.SetBounds($workArea.Left + $marginLeft, $workArea.Bottom - $overlayHeight - $marginBottom, $overlayWidth, $overlayHeight)
 $overlay.ShouldClose = [Func[bool]]{ $closeSignal.WaitOne(0) }
 $overlay.Add_VideoStarted({
@@ -417,15 +450,34 @@ $overlay.Add_VideoStarted({
 })
 $overlay.MicrophoneToggled = [Action[bool]]{
   param($microphoneOn)
-  & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int]$microphoneOn)
+  Set-StreamMicrophone $deviceConfig.microphone $microphoneOn
 }
 $requestEnd = {
   if ((Show-Message $messageConfig.endConfirm 'Question' 'YesNo') -eq 'Yes') {
+    # tell the recorder to stop the instant End is confirmed, so its "saving..." popup shows right away
+    $recordStop = $null
+    if ([System.Threading.EventWaitHandle]::TryOpenExisting($recordStopName, [ref]$recordStop)) { [void]$recordStop.Set() }
     Start-Hidden 'end-stream.ps1' '-fromOverlay'
     $overlay.Close()
   }
 }
 $overlay.Add_EndRequested($requestEnd)
+
+$overlay.RecordingPaused = [Action[bool]]{
+  param($paused)
+  $pauseSignal = $null
+  if (-not [System.Threading.EventWaitHandle]::TryOpenExisting($recordPauseName, [ref]$pauseSignal)) { return }
+  if ($paused) { [void]$pauseSignal.Set() } else { [void]$pauseSignal.Reset() }
+}
+# the pause button shows up once a recording is running and goes away if it stops
+$recordTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 500 }
+$recordTimer.Add_Tick({
+  $recordReady = $null
+  $isRecording = [System.Threading.EventWaitHandle]::TryOpenExisting($recordReadyName, [ref]$recordReady)
+  if ($recordReady) { $recordReady.Dispose() }
+  $overlay.SetRecordingAvailable($isRecording)
+})
+$overlay.Add_Shown({ $recordTimer.Start() })
 
 $endButtonTimer = New-Object System.Windows.Forms.Timer -Property @{ Interval = 300 }
 $endButtonTimer.Add_Tick({

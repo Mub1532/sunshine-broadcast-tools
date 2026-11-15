@@ -28,7 +28,7 @@
   "restarted": "Sunshine was restarted to apply the changes.",
   "applyFailed": "Could not configure Sunshine:\n{error}",
   "adminRequired": "Administrator permission is required to configure Sunshine.",
-  "componentsNeeded": "Broadcast needs extra components (VB-CABLE, svcl, libmpv). Install them now?",
+  "componentsNeeded": "Broadcast needs extra components (VB-CABLE, svcl, libmpv, ffmpeg). Install them now?",
   "componentsInstall": "Install",
   "componentsCancel": "Cancel",
   "componentsInstalling": "Installing broadcast components...",
@@ -38,5 +38,11 @@
   "repairing": "Fixing Sunshine settings, please wait...",
   "markedWorking": "Saved this version as the last working version. You can go back to it from Setup.",
   "markWorkingFailed": "Could not save this version: {error}",
-  "runnerFallback": "Note: run-hidden.exe doesn't work on this laptop, so streams use the old hidden method instead. Streaming still works, but devices that aren't set up properly for broadcast get a warning instead of being refused. The reason is in debug.log."
+  "runnerFallback": "Note: run-hidden.exe doesn't work on this laptop, so streams use the old hidden method instead. Streaming still works, but devices that aren't set up properly for broadcast get a warning instead of being refused. The reason is in debug.log.",
+  "recordAsk": "Do you want to record this stream?",
+  "recordFailed": "The recording could not be started, so this stream is not being recorded. The stream itself is not affected.",
+  "recordSaving": "Saving recording, please wait...",
+  "recordSaved": "Recording saved to:\n{folder}",
+  "recordNoSpace": "There isn't enough free disk space to record (less than {need} GB free), so this stream is not being recorded. The stream itself is not affected.",
+  "recordStoppedSpace": "Recording stopped because the disk is nearly full (less than {need} GB free). What was recorded has been saved. The stream is still running."
 }

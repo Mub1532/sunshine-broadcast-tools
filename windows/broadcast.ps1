@@ -33,10 +33,29 @@ function Read-NewLogLines {
   $newText -split "`r?`n"
 }
 
+# starts the audio mixer if it isn't running and waits for it to come up. false means it didn't, so the microphone has to go the old way
+function Start-AudioMix {
+  if (Test-AudioMix) { return $true }
+  Start-Hidden 'audio-mix.ps1'
+  $started = Get-Date
+  while (((Get-Date) - $started).TotalSeconds -lt 10) {
+    Start-Sleep -Milliseconds 200
+    if (Test-AudioMix) { return $true }
+    $mixLock = $null
+    if (((Get-Date) - $started).TotalSeconds -gt 5 -and -not [System.Threading.Mutex]::TryOpenExisting($audioMixLockName, [ref]$mixLock)) { return $false }
+  }
+  $false
+}
+
 # stop broadcast by, stoppin the camera feed in corner etc
 function Stop-Broadcast {
+  # tell the recorder to stop first, so its "saving..." popup shows straight away, before the slower teardown below
+  $recordStop = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($recordStopName, [ref]$recordStop)) { [void]$recordStop.Set() }
   Remove-Item $streamActivePath -ErrorAction SilentlyContinue
   if (-not $isCasting) { & $svclPath /SetListenToThisDevice $deviceConfig.microphone 0 }
+  $mixStop = $null
+  if ([System.Threading.EventWaitHandle]::TryOpenExisting($audioMixStopName, [ref]$mixStop)) { [void]$mixStop.Set() }
   $overlayClose = $null
   if ([System.Threading.EventWaitHandle]::TryOpenExisting($overlayCloseName, [ref]$overlayClose)) { [void]$overlayClose.Set() }
   $stopSignal = $null
@@ -55,7 +74,8 @@ switch ($action) {
     }
     if (-not $isCasting) {
       & $svclPath /SetPlaybackThroughDevice $deviceConfig.microphone $cableId
-      & $svclPath /SetListenToThisDevice $deviceConfig.microphone 1
+      # the mixer sends the microphone and the laptop sound. if it can't start, the microphone goes the old way through windows
+      & $svclPath /SetListenToThisDevice $deviceConfig.microphone ([int](-not (Start-AudioMix)))
     }
     exit 0
   }
